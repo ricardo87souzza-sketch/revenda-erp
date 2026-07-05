@@ -197,7 +197,7 @@ export default function Clients() {
       <h1 className="text-xl font-bold mb-4">👥 Clientes</h1>
 
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="metric-card text-center"><p className="text-lg font-bold text-[hsl(211,100%,50%)]">{clients.length}</p><p className="text-[10px] text-gray-400">Total</p></div>
+        <div className="metric-card text-center"><p className="text-lg font-bold text-blue-500">{clients.length}</p><p className="text-[10px] text-gray-400">Total</p></div>
         <div className="metric-card text-center"><p className="text-lg font-bold text-orange-500">{clients.filter((c: any) => c.total_pending > 0).length}</p><p className="text-[10px] text-gray-400">Pendentes</p></div>
         <div className="metric-card text-center"><p className="text-lg font-bold text-green-600">R$ {clients.reduce((s: number, c: any) => s + (c.total_paid || 0), 0).toFixed(0)}</p><p className="text-[10px] text-gray-400">Pago</p></div>
       </div>
@@ -212,7 +212,7 @@ export default function Clients() {
       ) : (
         <div className="space-y-2">
           {filtered.map((client: any) => (
-            <div key={client.id} onClick={() => openHistory(client)} className="ios-list-item cursor-pointer border-l-4 border-l-[hsl(211,100%,50%)]">
+            <div key={client.id} onClick={() => openHistory(client)} className="ios-list-item cursor-pointer border-l-4 border-l-blue-400">
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="font-semibold text-sm">{client.name}</h3>
@@ -230,6 +230,7 @@ export default function Clients() {
 
       <button onClick={() => { setEditingClient(null); setForm({ name: '', phone: '', email: '', address: '', notes: '' }); setShowForm(true) }} className="fab"><Plus size={24} /></button>
 
+      {/* Modal Histórico */}
       <Dialog open={showHistory} onOpenChange={setShowHistory}>
         <DialogContent className="ios-sheet max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{selectedClient?.name}</DialogTitle></DialogHeader>
@@ -261,17 +262,26 @@ export default function Clients() {
                   )}
                 </div>
               ))}
-              <div className="flex flex-wrap gap-2 pt-2">
-                <Button onClick={() => setShowExtraPayment(true)} className="bg-green-600 text-xs"><Wallet size={14} className="mr-1" /> Pagamento</Button>
-                <Button onClick={handleShare} className="bg-blue-500 text-xs"><Share2 size={14} className="mr-1" /> WhatsApp</Button>
-                <Button onClick={() => { setEditingClient(selectedClient); setForm({ name: selectedClient.name, phone: selectedClient.phone || '', email: selectedClient.email || '', address: selectedClient.address || '', notes: selectedClient.notes || '' }); setShowHistory(false); setShowForm(true) }} className="bg-yellow-500 text-xs"><Pencil size={14} className="mr-1" /> Editar</Button>
-                <Button onClick={() => handleDelete(selectedClient.id)} className="bg-red-500 text-xs"><Trash2 size={14} className="mr-1" /> Excluir</Button>
+              <div className="grid grid-cols-4 gap-1.5 pt-2">
+                <Button onClick={() => setShowExtraPayment(true)} className="bg-green-600 hover:bg-green-700 text-white text-[10px] h-9 px-1">
+                  <Wallet size={12} className="mr-0.5" /> PG Avulso
+                </Button>
+                <Button onClick={handleShare} className="bg-blue-500 hover:bg-blue-600 text-white text-[10px] h-9 px-1">
+                  <Share2 size={12} className="mr-0.5" /> WhatsApp
+                </Button>
+                <Button onClick={() => { setEditingClient(selectedClient); setForm({ name: selectedClient.name, phone: selectedClient.phone || '', email: selectedClient.email || '', address: selectedClient.address || '', notes: selectedClient.notes || '' }); setShowHistory(false); setShowForm(true) }} className="bg-yellow-500 hover:bg-yellow-600 text-white text-[10px] h-9 px-1">
+                  <Pencil size={12} className="mr-0.5" /> Editar
+                </Button>
+                <Button onClick={() => handleDelete(selectedClient.id)} className="bg-red-500 hover:bg-red-600 text-white text-[10px] h-9 px-1">
+                  <Trash2 size={12} className="mr-0.5" /> Excluir
+                </Button>
               </div>
             </div>
           ) : <p className="text-center py-4 text-gray-400">Carregando...</p>}
         </DialogContent>
       </Dialog>
 
+      {/* Modal Pagamento Avulso */}
       <Dialog open={showExtraPayment} onOpenChange={setShowExtraPayment}>
         <DialogContent className="ios-sheet max-w-sm">
           <DialogHeader><DialogTitle>Pagamento Avulso</DialogTitle></DialogHeader>
@@ -287,6 +297,7 @@ export default function Clients() {
         </DialogContent>
       </Dialog>
 
+      {/* Modal Cadastro/Edição */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="ios-sheet max-w-md">
           <DialogHeader><DialogTitle>{editingClient ? 'Editar' : 'Novo'} Cliente</DialogTitle></DialogHeader>
@@ -298,7 +309,7 @@ export default function Clients() {
             <Input placeholder="Observações" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} />
             <div className="flex gap-2 pt-2">
               <Button type="button" variant="outline" className="flex-1" onClick={() => setShowForm(false)}>Cancelar</Button>
-              <Button type="submit" className="flex-1 bg-[hsl(211,100%,50%)]">Salvar</Button>
+              <Button type="submit" className="flex-1 bg-blue-500">Salvar</Button>
             </div>
           </form>
         </DialogContent>
