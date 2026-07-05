@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, Users, Trash2, Pencil, Wallet, Share2 } from 'lucide-react'
+import { Search, Plus, Users, Trash2, Pencil } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import html2canvas from 'html2canvas'
+import { ShareCard } from '@/components/clients/ShareCard'
 
 export default function Clients() {
   const [search, setSearch] = useState('')
@@ -18,6 +20,7 @@ export default function Clients() {
   const [clientHistory, setClientHistory] = useState<any>(null)
   const [extraAmount, setExtraAmount] = useState('')
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '' })
+  const shareCardRef = useRef<HTMLDivElement>(null)
   const { user } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -73,16 +76,11 @@ export default function Clients() {
         const insts = sale.installments || []
         if (insts.length > 0) {
           insts.forEach((inst: any) => {
-            if (inst.status === 'pago') {
-              totalPaid += (inst.paid_amount || inst.amount)
-            } else {
-              totalPending += (inst.amount - (inst.paid_amount || 0))
-            }
+            if (inst.status === 'pago') totalPaid += (inst.paid_amount || inst.amount)
+            else totalPending += (inst.amount - (inst.paid_amount || 0))
           })
         } else {
-          if (sale.payment_method !== 'a_prazo') {
-            totalPaid += sale.total_amount
-          }
+          if (sale.payment_method !== 'a_prazo') totalPaid += sale.total_amount
         }
       })
 
@@ -154,17 +152,30 @@ export default function Clients() {
     }
   }
 
-  const handleShare = () => {
+  const handleShare = async () => {
     if (!clientHistory?.sales?.length) return alert('Nenhuma venda!')
-    const sale = clientHistory.sales[0]
-    let text = `📋 *${selectedClient.name}*\n📅 ${new Date(sale.sale_date).toLocaleDateString('pt-BR')}\n💰 R$ ${sale.total_amount?.toFixed(2)}\n`
-    const pending = (sale.installments || []).filter((i: any) => i.status === 'pendente')
-    if (pending.length) {
-      text += '\n*Pendentes:*\n' + pending.map((i: any) =>
-        `  ${i.installment_number}x - R$ ${(i.amount - (i.paid_amount || 0)).toFixed(2)} Venc: ${new Date(i.due_date).toLocaleDateString('pt-BR')}`
-      ).join('\n')
-    }
-    window.open(`https://wa.me/55${selectedClient.phone?.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank')
+    
+    setTimeout(async () => {
+      if (shareCardRef.current) {
+        try {
+          const canvas = await html2canvas(shareCardRef.current, { scale: 3, backgroundColor: null })
+          canvas.toBlob(async (blob) => {
+            if (blob) {
+              const file = new File([blob], 'venda.png', { type: 'image/png' })
+              if (navigator.share && navigator.canShare({ files: [file] })) {
+                await navigator.share({ files: [file], title: `Venda - ${selectedClient.name}` })
+              } else {
+                const sale = clientHistory.sales[0]
+                const text = `📋 *${selectedClient.name}*\n💰 Total: R$ ${sale.total_amount?.toFixed(2)}\n📅 ${new Date(sale.sale_date).toLocaleDateString('pt-BR')}`
+                window.open(`https://wa.me/55${selectedClient.phone?.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank')
+              }
+            }
+          }, 'image/png')
+        } catch (err) {
+          console.error('Erro ao gerar imagem:', err)
+        }
+      }
+    }, 300)
   }
 
   const handleSave = async (e: React.FormEvent) => {
@@ -194,6 +205,14 @@ export default function Clients() {
 
   return (
     <div className="p-3 sm:p-4 mb-24 max-w-2xl mx-auto">
+      {/* Card oculto para gerar imagem */}
+      <ShareCard
+        ref={shareCardRef}
+        clientName={selectedClient?.name || ''}
+        sale={clientHistory?.sales?.[0]}
+        totalPending={clientHistory?.totalPending || 0}
+      />
+
       <h1 className="text-xl font-bold mb-4">👥 Clientes</h1>
 
       <div className="grid grid-cols-3 gap-2 mb-4">
@@ -214,14 +233,8 @@ export default function Clients() {
           {filtered.map((client: any) => (
             <div key={client.id} onClick={() => openHistory(client)} className="ios-list-item cursor-pointer border-l-4 border-l-blue-400">
               <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="font-semibold text-sm">{client.name}</h3>
-                  {client.phone && <p className="text-xs text-gray-400">📱 {client.phone}</p>}
-                  <p className="text-[10px] text-gray-400 mt-0.5">Compras: R$ {(client.total_purchases || 0).toFixed(0)}</p>
-                </div>
-                {client.total_pending > 0 && (
-                  <span className="text-[10px] bg-red-50 text-red-500 px-2 py-0.5 rounded-full font-bold">R$ {client.total_pending.toFixed(0)}</span>
-                )}
+                <div><h3 className="font-semibold text-sm">{client.name}</h3>{client.phone && <p className="text-xs text-gray-400">📱 {client.phone}</p>}<p className="text-[10px] text-gray-400 mt-0.5">Compras: R$ {(client.total_purchases || 0).toFixed(0)}</p></div>
+                {client.total_pending > 0 && <span className="text-[10px] bg-red-50 text-red-500 px-2 py-0.5 rounded-full font-bold">R$ {client.total_pending.toFixed(0)}</span>}
               </div>
             </div>
           ))}
@@ -243,19 +256,14 @@ export default function Clients() {
               {clientHistory.sales.map((sale: any) => (
                 <div key={sale.id} className="bg-gray-50 p-3 rounded-xl">
                   <div className="flex justify-between text-sm mb-1"><span>{new Date(sale.sale_date).toLocaleDateString('pt-BR')}</span><b>R$ {sale.total_amount?.toFixed(2)}</b></div>
-                  {sale.items?.map((item: any) => (
-                    <div key={item.id} className="flex justify-between text-xs text-gray-500 ml-2">{item.product_name} x{item.quantity}<span>R$ {item.total_price?.toFixed(2)}</span></div>
-                  ))}
+                  {sale.items?.map((item: any) => <div key={item.id} className="flex justify-between text-xs text-gray-500 ml-2">{item.product_name} x{item.quantity}<span>R$ {item.total_price?.toFixed(2)}</span></div>)}
                   {(sale.installments || []).length > 0 && (
                     <div className="mt-2 space-y-1">
                       {sale.installments.map((inst: any) => (
                         <div key={inst.id} className="flex items-center justify-between bg-white p-2 rounded-lg">
                           <span className="text-xs">{inst.installment_number}x R$ {(inst.amount - (inst.paid_amount || 0)).toFixed(2)} - {new Date(inst.due_date).toLocaleDateString('pt-BR')}</span>
-                          {inst.status === 'pendente' ? (
-                            <button onClick={() => handlePayInstallment(inst)} className="text-[10px] bg-red-500 text-white px-2 py-1 rounded-full font-bold hover:bg-green-500">PENDENTE</button>
-                          ) : (
-                            <span className="text-[10px] bg-green-500 text-white px-2 py-1 rounded-full font-bold">PAGO ✓</span>
-                          )}
+                          {inst.status === 'pendente' ? <button onClick={() => handlePayInstallment(inst)} className="text-[10px] bg-red-500 text-white px-2 py-1 rounded-full font-bold hover:bg-green-500">PENDENTE</button>
+                          : <span className="text-[10px] bg-green-500 text-white px-2 py-1 rounded-full font-bold">PAGO ✓</span>}
                         </div>
                       ))}
                     </div>
@@ -263,18 +271,10 @@ export default function Clients() {
                 </div>
               ))}
               <div className="grid grid-cols-4 gap-1.5 pt-2">
-                <Button onClick={() => setShowExtraPayment(true)} className="bg-green-600 hover:bg-green-700 text-white text-[10px] h-9 px-1">
-                  <Wallet size={12} className="mr-0.5" /> Avulso
-                </Button>
-                <Button onClick={handleShare} className="bg-blue-500 hover:bg-blue-600 text-white text-[10px] h-9 px-1">
-                  <Share2 size={12} className="mr-0.5" /> Zap
-                </Button>
-                <Button onClick={() => { setEditingClient(selectedClient); setForm({ name: selectedClient.name, phone: selectedClient.phone || '', email: selectedClient.email || '', address: selectedClient.address || '', notes: selectedClient.notes || '' }); setShowHistory(false); setShowForm(true) }} className="bg-yellow-500 hover:bg-yellow-600 text-white text-[10px] h-9 px-1">
-                  <Pencil size={12} className="mr-0.5" /> Editar
-                </Button>
-                <Button onClick={() => handleDelete(selectedClient.id)} className="bg-red-500 hover:bg-red-600 text-white text-[10px] h-9 px-1">
-                  <Trash2 size={12} className="mr-0.5" /> Excluir
-                </Button>
+                <Button onClick={() => setShowExtraPayment(true)} className="bg-green-600 hover:bg-green-700 text-white text-[10px] h-9 px-0.5">💵 Avulso</Button>
+                <Button onClick={handleShare} className="bg-blue-500 hover:bg-blue-600 text-white text-[10px] h-9 px-0.5">📤 Zap</Button>
+                <Button onClick={() => { setEditingClient(selectedClient); setForm({ name: selectedClient.name, phone: selectedClient.phone || '', email: selectedClient.email || '', address: selectedClient.address || '', notes: selectedClient.notes || '' }); setShowHistory(false); setShowForm(true) }} className="bg-yellow-500 hover:bg-yellow-600 text-white text-[10px] h-9 px-0.5">✏️ Editar</Button>
+                <Button onClick={() => handleDelete(selectedClient.id)} className="bg-red-500 hover:bg-red-600 text-white text-[10px] h-9 px-0.5">🗑️ Excluir</Button>
               </div>
             </div>
           ) : <p className="text-center py-4 text-gray-400">Carregando...</p>}
@@ -289,10 +289,7 @@ export default function Clients() {
             <p className="text-sm">Pendente: R$ {clientHistory?.totalPending.toFixed(2)}</p>
             <p className="text-xs text-gray-400">Abate nas parcelas mais antigas primeiro.</p>
             <Input type="number" step="0.01" value={extraAmount} onChange={e => setExtraAmount(e.target.value)} placeholder="Valor" autoFocus />
-            <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => setShowExtraPayment(false)}>Cancelar</Button>
-              <Button className="flex-1 bg-green-600" onClick={handleExtraPayment}>Pagar</Button>
-            </div>
+            <div className="flex gap-2"><Button variant="outline" className="flex-1" onClick={() => setShowExtraPayment(false)}>Cancelar</Button><Button className="flex-1 bg-green-600" onClick={handleExtraPayment}>Pagar</Button></div>
           </div>
         </DialogContent>
       </Dialog>
@@ -307,10 +304,7 @@ export default function Clients() {
             <Input placeholder="Email" type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
             <Input placeholder="Endereço" value={form.address} onChange={e => setForm({...form, address: e.target.value})} />
             <Input placeholder="Observações" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} />
-            <div className="flex gap-2 pt-2">
-              <Button type="button" variant="outline" className="flex-1" onClick={() => setShowForm(false)}>Cancelar</Button>
-              <Button type="submit" className="flex-1 bg-blue-500">Salvar</Button>
-            </div>
+            <div className="flex gap-2 pt-2"><Button type="button" variant="outline" className="flex-1" onClick={() => setShowForm(false)}>Cancelar</Button><Button type="submit" className="flex-1 bg-blue-500">Salvar</Button></div>
           </form>
         </DialogContent>
       </Dialog>
