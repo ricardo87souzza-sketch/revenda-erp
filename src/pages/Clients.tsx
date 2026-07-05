@@ -264,10 +264,10 @@ export default function Clients() {
               ))}
               <div className="grid grid-cols-4 gap-1.5 pt-2">
                 <Button onClick={() => setShowExtraPayment(true)} className="bg-green-600 hover:bg-green-700 text-white text-[10px] h-9 px-1">
-                  <Wallet size={12} className="mr-0.5" /> PG Avulso
+                  <Wallet size={12} className="mr-0.5" /> Avulso
                 </Button>
                 <Button onClick={handleShare} className="bg-blue-500 hover:bg-blue-600 text-white text-[10px] h-9 px-1">
-                  <Share2 size={12} className="mr-0.5" /> WhatsApp
+                  <Share2 size={12} className="mr-0.5" /> Zap
                 </Button>
                 <Button onClick={() => { setEditingClient(selectedClient); setForm({ name: selectedClient.name, phone: selectedClient.phone || '', email: selectedClient.email || '', address: selectedClient.address || '', notes: selectedClient.notes || '' }); setShowHistory(false); setShowForm(true) }} className="bg-yellow-500 hover:bg-yellow-600 text-white text-[10px] h-9 px-1">
                   <Pencil size={12} className="mr-0.5" /> Editar
