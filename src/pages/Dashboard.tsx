@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { DollarSign, Package, ShoppingCart, Users, FileText, TrendingUp, AlertTriangle, X } from 'lucide-react'
+import { DollarSign, Package, ShoppingCart, Users, FileText, TrendingUp, AlertTriangle, Calendar, CreditCard } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
@@ -16,6 +16,8 @@ export default function Dashboard() {
   const [newBalance, setNewBalance] = useState('')
   const [showRecebimentos, setShowRecebimentos] = useState(false)
   const [showBoletosPagos, setShowBoletosPagos] = useState(false)
+  const [showBoletosMes, setShowBoletosMes] = useState(false)
+  const [showParcelasMes, setShowParcelasMes] = useState(false)
   const { user } = useAuth()
   const navigate = useNavigate()
 
@@ -29,7 +31,7 @@ export default function Dashboard() {
       const { data: products } = await supabase.from('products').select('*')
       const { data: sales } = await supabase.from('sales').select('*').eq('status', 'ativa')
       const { data: bills } = await supabase.from('bills').select('*')
-      const { data: installments } = await supabase.from('installments').select('*, sales!inner(client_id)')
+      const { data: installments } = await supabase.from('installments').select('*')
       const { data: cashFlow } = await supabase.from('cash_flow').select('*').single()
 
       const lowStock = products?.filter(p => p.quantity > 0 && p.quantity <= (p.min_stock || 5)) || []
@@ -44,8 +46,25 @@ export default function Dashboard() {
       const totalTodaySales = todaySales.reduce((s, sale) => s + sale.total_amount, 0)
 
       const pendingBills = bills?.filter(b => b.status === 'pendente') || []
-      const pendingInstallments = installments?.filter(i => i.status === 'pendente') || []
-      const totalPending = pendingInstallments.reduce((s, i) => s + (i.amount - (i.paid_amount || 0)), 0)
+      
+      // Boletos do mês vigente (pendentes com vencimento no mês)
+      const boletosMes = bills?.filter(b => b.status === 'pendente' && b.due_date >= startDate && b.due_date <= endDate) || []
+      const totalBoletosMes = boletosMes.reduce((s, b) => s + b.amount, 0)
+
+      // Parcelas a receber no mês vigente
+      const parcelasMes = installments?.filter(i => i.status === 'pendente' && i.due_date >= startDate && i.due_date <= endDate) || []
+      const totalParcelasMes = parcelasMes.reduce((s, i) => s + (i.amount - (i.paid_amount || 0)), 0)
+
+      // Buscar clientes para as parcelas do mês
+      const parcelasComClientes = await Promise.all(
+        parcelasMes.map(async (inst) => {
+          const { data: sale } = await supabase.from('sales').select('client_id').eq('id', inst.sale_id).single()
+          const { data: client } = sale ? await supabase.from('clients').select('name').eq('id', sale.client_id).single() : { data: null }
+          return { ...inst, client_name: client?.name || 'Cliente' }
+        })
+      )
+
+      const totalPending = installments?.filter(i => i.status === 'pendente').reduce((s, i) => s + (i.amount - (i.paid_amount || 0)), 0) || 0
 
       const paidBills = bills?.filter(b => b.status === 'pago' && b.payment_date && b.payment_date >= startDate && b.payment_date <= endDate) || []
       const totalPaidBills = paidBills.reduce((s, b) => s + (b.paid_amount || b.amount), 0)
@@ -53,7 +72,6 @@ export default function Dashboard() {
       const receivedInstallments = installments?.filter(i => i.status === 'pago' && i.payment_date && i.payment_date >= startDate && i.payment_date <= endDate) || []
       const totalReceived = receivedInstallments.reduce((s, i) => s + (i.paid_amount || i.amount), 0)
 
-      // Buscar nomes dos clientes para os recebimentos
       const receivedWithClients = await Promise.all(
         receivedInstallments.map(async (inst) => {
           const { data: sale } = await supabase.from('sales').select('client_id').eq('id', inst.sale_id).single()
@@ -62,7 +80,6 @@ export default function Dashboard() {
         })
       )
 
-      // Pagamentos avulsos
       const { data: extraPayments } = await supabase
         .from('extra_payments')
         .select('*, clients:client_id(name)')
@@ -74,7 +91,9 @@ export default function Dashboard() {
       return {
         lowStock, stockProducts, stockValue, stockCost, stockProfit,
         monthSales, totalMonthSales, todaySales, totalTodaySales,
-        pendingBills, pendingInstallments, totalPending,
+        pendingBills, totalPending,
+        boletosMes, totalBoletosMes,
+        parcelasMes: parcelasComClientes, totalParcelasMes,
         paidBills, totalPaidBills,
         receivedInstallments: receivedWithClients,
         extraPayments: extraPayments || [],
@@ -115,6 +134,7 @@ export default function Dashboard() {
         <div><h1 className="text-xl font-bold">Dashboard</h1><p className="text-xs text-gray-400">{months[selectedMonth]} {selectedYear}</p></div>
       </div>
 
+      {/* Abas meses */}
       <div className="flex gap-1 mb-4 overflow-x-auto pb-2">
         {Array.from({ length: 6 }, (_, i) => {
           const d = new Date(); d.setMonth(d.getMonth() - (5 - i))
@@ -157,14 +177,30 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Grid */}
+      {/* Grid principal */}
       <div className="grid grid-cols-2 gap-2 sm:gap-3">
         <div onClick={() => navigate('/products')} className="metric-card cursor-pointer active:scale-95"><AlertTriangle size={18} color="hsl(38, 92%, 50%)" /><p className="text-xl font-bold text-orange-500 mt-1">{data.lowStock?.length || 0}</p><p className="text-[10px] text-gray-400">Estoque Baixo</p></div>
+        
+        {/* NOVO: Boletos do Mês */}
+        <div onClick={() => setShowBoletosMes(true)} className="metric-card cursor-pointer active:scale-95">
+          <Calendar size={18} color="hsl(0, 72%, 51%)" />
+          <p className="text-lg font-bold text-red-500 mt-1">{data.boletosMes?.length || 0}</p>
+          <p className="text-[10px] text-gray-400">Boletos do Mês</p>
+          <p className="text-xs font-bold text-red-500">R$ {data.totalBoletosMes?.toFixed(0)}</p>
+        </div>
+
+        {/* NOVO: Parcelas do Mês */}
+        <div onClick={() => setShowParcelasMes(true)} className="metric-card cursor-pointer active:scale-95">
+          <CreditCard size={18} color="hsl(211, 100%, 50%)" />
+          <p className="text-lg font-bold text-blue-500 mt-1">{data.parcelasMes?.length || 0}</p>
+          <p className="text-[10px] text-gray-400">Parcelas do Mês</p>
+          <p className="text-xs font-bold text-blue-500">R$ {data.totalParcelasMes?.toFixed(0)}</p>
+        </div>
+
         <div className="metric-card"><ShoppingCart size={18} color="hsl(211, 100%, 50%)" /><p className="text-xl font-bold text-blue-500 mt-1">R$ {data.totalTodaySales?.toFixed(0)}</p><p className="text-[10px] text-gray-400">Vendas Hoje</p></div>
         <div className="metric-card"><TrendingUp size={18} color="hsl(142, 76%, 36%)" /><p className="text-xl font-bold text-green-600 mt-1">R$ {data.totalMonthSales?.toFixed(0)}</p><p className="text-[10px] text-gray-400">{data.monthSales?.length || 0} vendas</p></div>
         <div className="metric-card"><Users size={18} color="hsl(38, 92%, 50%)" /><p className="text-xl font-bold text-orange-500 mt-1">R$ {data.totalPending?.toFixed(0)}</p><p className="text-[10px] text-gray-400">A Receber</p></div>
         <div className="metric-card"><Package size={18} color="hsl(211, 100%, 50%)" /><p className="text-xl font-bold text-blue-500 mt-1">R$ {data.stockValue?.toFixed(0)}</p><p className="text-[10px] text-gray-400">{data.stockProducts?.length || 0} itens</p></div>
-        <div className="metric-card"><FileText size={18} color="hsl(0, 72%, 51%)" /><p className="text-xl font-bold text-red-500 mt-1">{data.pendingBills?.length || 0}</p><p className="text-[10px] text-gray-400">Boletos</p></div>
         <div className="metric-card"><DollarSign size={18} color="hsl(142, 76%, 36%)" /><p className="text-xl font-bold text-green-600 mt-1">R$ {data.stockProfit?.toFixed(0)}</p><p className="text-[10px] text-gray-400">Lucro Est.</p></div>
         <div className="metric-card"><Package size={18} color="hsl(211, 100%, 50%)" /><p className="text-xl font-bold text-blue-500 mt-1">{data.totalProducts}</p><p className="text-[10px] text-gray-400">Produtos</p></div>
       </div>
@@ -193,10 +229,7 @@ export default function Dashboard() {
                 {data.extraPayments?.map((ep: any) => (
                   <div key={ep.id} className="bg-green-50 p-3 rounded-xl border border-green-200">
                     <div className="flex justify-between items-center">
-                      <div>
-                        <p className="text-sm font-medium">{ep.clients?.name || 'Cliente'}</p>
-                        <p className="text-xs text-gray-500">Pagamento Avulso - {new Date(ep.created_at).toLocaleDateString('pt-BR')}</p>
-                      </div>
+                      <div><p className="text-sm font-medium">{ep.clients?.name || 'Cliente'}</p><p className="text-xs text-gray-500">Pagamento Avulso - {new Date(ep.created_at).toLocaleDateString('pt-BR')}</p></div>
                       <p className="font-bold text-green-700">R$ {ep.amount?.toFixed(2)}</p>
                     </div>
                   </div>
@@ -219,12 +252,69 @@ export default function Dashboard() {
               data.paidBills.map((bill: any) => (
                 <div key={bill.id} className="bg-blue-50 p-3 rounded-xl">
                   <div className="flex justify-between items-center">
+                    <div><p className="text-sm font-medium">{bill.supplier}</p><p className="text-xs text-gray-500">Pago em: {new Date(bill.payment_date).toLocaleDateString('pt-BR')}</p><p className="text-xs text-gray-400">Venc: {new Date(bill.due_date).toLocaleDateString('pt-BR')}</p></div>
+                    <p className="font-bold text-blue-700">R$ {(bill.paid_amount || bill.amount)?.toFixed(2)}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* POP-UP: Boletos do Mês */}
+      <Dialog open={showBoletosMes} onOpenChange={setShowBoletosMes}>
+        <DialogContent className="ios-sheet max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>📄 Boletos do Mês</DialogTitle></DialogHeader>
+          <div className="space-y-2 mt-2">
+            <div className="flex justify-between items-center mb-2">
+              <p className="text-sm text-gray-500">{data.boletosMes?.length || 0} boleto(s)</p>
+              <p className="text-sm font-bold text-red-600">Total: R$ {data.totalBoletosMes?.toFixed(2)}</p>
+            </div>
+            {data.boletosMes?.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">Nenhum boleto este mês 🎉</p>
+            ) : (
+              data.boletosMes
+                .sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+                .map((bill: any) => (
+                <div key={bill.id} className="bg-red-50 p-3 rounded-xl border border-red-200">
+                  <div className="flex justify-between items-center">
                     <div>
                       <p className="text-sm font-medium">{bill.supplier}</p>
-                      <p className="text-xs text-gray-500">Pago em: {new Date(bill.payment_date).toLocaleDateString('pt-BR')}</p>
-                      <p className="text-xs text-gray-400">Venc: {new Date(bill.due_date).toLocaleDateString('pt-BR')}</p>
+                      <p className="text-xs text-gray-500">Venc: {new Date(bill.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p>
+                      {bill.notes && <p className="text-[10px] text-gray-400">{bill.notes}</p>}
                     </div>
-                    <p className="font-bold text-blue-700">R$ {(bill.paid_amount || bill.amount)?.toFixed(2)}</p>
+                    <p className="font-bold text-red-700">R$ {bill.amount?.toFixed(2)}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* POP-UP: Parcelas do Mês */}
+      <Dialog open={showParcelasMes} onOpenChange={setShowParcelasMes}>
+        <DialogContent className="ios-sheet max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>💳 Parcelas a Receber</DialogTitle></DialogHeader>
+          <div className="space-y-2 mt-2">
+            <div className="flex justify-between items-center mb-2">
+              <p className="text-sm text-gray-500">{data.parcelasMes?.length || 0} parcela(s)</p>
+              <p className="text-sm font-bold text-blue-600">Total: R$ {data.totalParcelasMes?.toFixed(2)}</p>
+            </div>
+            {data.parcelasMes?.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">Nenhuma parcela este mês 🎉</p>
+            ) : (
+              data.parcelasMes
+                .sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+                .map((inst: any) => (
+                <div key={inst.id} className="bg-blue-50 p-3 rounded-xl border border-blue-200">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="text-sm font-medium">{inst.client_name}</p>
+                      <p className="text-xs text-gray-500">{inst.installment_number}x - Venc: {new Date(inst.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p>
+                    </div>
+                    <p className="font-bold text-blue-700">R$ {(inst.amount - (inst.paid_amount || 0))?.toFixed(2)}</p>
                   </div>
                 </div>
               ))
