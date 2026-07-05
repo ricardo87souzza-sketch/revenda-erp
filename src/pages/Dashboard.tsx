@@ -14,10 +14,10 @@ export default function Dashboard() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [editingBalance, setEditingBalance] = useState(false)
   const [newBalance, setNewBalance] = useState('')
-  const [showRecebimentos, setShowRecebimentos] = useState(false)
-  const [showBoletosPagos, setShowBoletosPagos] = useState(false)
-  const [showBoletosMes, setShowBoletosMes] = useState(false)
-  const [showParcelasMes, setShowParcelasMes] = useState(false)
+  
+  // Modais
+  const [modal, setModal] = useState<{ title: string; type: string } | null>(null)
+  
   const { user } = useAuth()
   const navigate = useNavigate()
 
@@ -33,74 +33,129 @@ export default function Dashboard() {
       const { data: bills } = await supabase.from('bills').select('*')
       const { data: installments } = await supabase.from('installments').select('*')
       const { data: cashFlow } = await supabase.from('cash_flow').select('*').single()
+      const { data: cashTransactions } = await supabase.from('cash_transactions').select('*')
+        .gte('created_at', startDate).lte('created_at', endDate + 'T23:59:59').order('created_at', { ascending: false })
 
+      // Estoque baixo
       const lowStock = products?.filter(p => p.quantity > 0 && p.quantity <= (p.min_stock || 5)) || []
+      
+      // Produtos em estoque
       const stockProducts = products?.filter(p => p.quantity > 0) || []
+      const stockProductsWithProfit = stockProducts.map(p => ({
+        ...p,
+        profit: (p.sale_price - p.cost_price) * p.quantity,
+        profitUnit: p.sale_price - p.cost_price
+      }))
       const stockValue = stockProducts.reduce((s, p) => s + (p.sale_price * p.quantity), 0)
       const stockCost = stockProducts.reduce((s, p) => s + (p.cost_price * p.quantity), 0)
       const stockProfit = stockValue - stockCost
 
+      // Vendas do mês
       const monthSales = sales?.filter(s => s.sale_date >= startDate && s.sale_date <= endDate) || []
       const totalMonthSales = monthSales.reduce((s, sale) => s + sale.total_amount, 0)
+      
+      // Vendas do dia
       const todaySales = sales?.filter(s => s.sale_date === today) || []
       const totalTodaySales = todaySales.reduce((s, sale) => s + sale.total_amount, 0)
 
-      const pendingBills = bills?.filter(b => b.status === 'pendente') || []
-      
-      // Boletos do mês vigente (pendentes com vencimento no mês)
+      // Vendas com detalhes
+      const todaySalesDetailed = await Promise.all(todaySales.map(async (s) => {
+        const { data: client } = await supabase.from('clients').select('name').eq('id', s.client_id).single()
+        const { data: items } = await supabase.from('sale_items').select('*, product:product_id(name)').eq('sale_id', s.id)
+        return { ...s, client_name: client?.name || 'Cliente', items: items || [] }
+      }))
+
+      const monthSalesDetailed = await Promise.all(monthSales.map(async (s) => {
+        const { data: client } = await supabase.from('clients').select('name').eq('id', s.client_id).single()
+        return { ...s, client_name: client?.name || 'Cliente' }
+      }))
+
+      // Boletos do mês
       const boletosMes = bills?.filter(b => b.status === 'pendente' && b.due_date >= startDate && b.due_date <= endDate) || []
       const totalBoletosMes = boletosMes.reduce((s, b) => s + b.amount, 0)
 
-      // Parcelas a receber no mês vigente
+      // Parcelas do mês
       const parcelasMes = installments?.filter(i => i.status === 'pendente' && i.due_date >= startDate && i.due_date <= endDate) || []
       const totalParcelasMes = parcelasMes.reduce((s, i) => s + (i.amount - (i.paid_amount || 0)), 0)
+      const parcelasComClientes = await Promise.all(parcelasMes.map(async (inst) => {
+        const { data: sale } = await supabase.from('sales').select('client_id').eq('id', inst.sale_id).single()
+        const { data: client } = sale ? await supabase.from('clients').select('name').eq('id', sale.client_id).single() : { data: null }
+        return { ...inst, client_name: client?.name || 'Cliente' }
+      }))
 
-      // Buscar clientes para as parcelas do mês
-      const parcelasComClientes = await Promise.all(
-        parcelasMes.map(async (inst) => {
-          const { data: sale } = await supabase.from('sales').select('client_id').eq('id', inst.sale_id).single()
-          const { data: client } = sale ? await supabase.from('clients').select('name').eq('id', sale.client_id).single() : { data: null }
-          return { ...inst, client_name: client?.name || 'Cliente' }
-        })
-      )
+      // Total a receber (todas pendentes)
+      const allPending = installments?.filter(i => i.status === 'pendente') || []
+      const totalPending = allPending.reduce((s, i) => s + (i.amount - (i.paid_amount || 0)), 0)
+      const pendingWithClients = await Promise.all(allPending.map(async (inst) => {
+        const { data: sale } = await supabase.from('sales').select('client_id').eq('id', inst.sale_id).single()
+        const { data: client } = sale ? await supabase.from('clients').select('name').eq('id', sale.client_id).single() : { data: null }
+        return { ...inst, client_name: client?.name || 'Cliente' }
+      }))
 
-      const totalPending = installments?.filter(i => i.status === 'pendente').reduce((s, i) => s + (i.amount - (i.paid_amount || 0)), 0) || 0
-
+      // Boletos pagos
       const paidBills = bills?.filter(b => b.status === 'pago' && b.payment_date && b.payment_date >= startDate && b.payment_date <= endDate) || []
       const totalPaidBills = paidBills.reduce((s, b) => s + (b.paid_amount || b.amount), 0)
 
+      // Recebimentos
       const receivedInstallments = installments?.filter(i => i.status === 'pago' && i.payment_date && i.payment_date >= startDate && i.payment_date <= endDate) || []
       const totalReceived = receivedInstallments.reduce((s, i) => s + (i.paid_amount || i.amount), 0)
-
-      const receivedWithClients = await Promise.all(
-        receivedInstallments.map(async (inst) => {
-          const { data: sale } = await supabase.from('sales').select('client_id').eq('id', inst.sale_id).single()
-          const { data: client } = sale ? await supabase.from('clients').select('name').eq('id', sale.client_id).single() : { data: null }
-          return { ...inst, client_name: client?.name || 'Cliente' }
-        })
-      )
+      const receivedWithClients = await Promise.all(receivedInstallments.map(async (inst) => {
+        const { data: sale } = await supabase.from('sales').select('client_id').eq('id', inst.sale_id).single()
+        const { data: client } = sale ? await supabase.from('clients').select('name').eq('id', sale.client_id).single() : { data: null }
+        return { ...inst, client_name: client?.name || 'Cliente' }
+      }))
 
       const { data: extraPayments } = await supabase
-        .from('extra_payments')
-        .select('*, clients:client_id(name)')
-        .gte('created_at', startDate)
-        .lte('created_at', endDate)
+        .from('extra_payments').select('*, clients:client_id(name)')
+        .gte('created_at', startDate).lte('created_at', endDate + 'T23:59:59')
+
+      // Lucro obtido (vendas do mês)
+      let totalLucroObtido = 0
+      const lucrosPorProduto: any = {}
+      for (const sale of monthSales) {
+        const { data: items } = await supabase.from('sale_items').select('*, product:product_id(name, cost_price)').eq('sale_id', sale.id)
+        if (items) {
+          for (const item of items) {
+            const custo = (item.product?.cost_price || 0) * item.quantity
+            const lucro = item.total_price - custo
+            totalLucroObtido += lucro
+            const nome = item.product?.name || 'Produto'
+            if (!lucrosPorProduto[nome]) lucrosPorProduto[nome] = { name: nome, quantity: 0, lucro: 0, total: 0 }
+            lucrosPorProduto[nome].quantity += item.quantity
+            lucrosPorProduto[nome].lucro += lucro
+            lucrosPorProduto[nome].total += item.total_price
+          }
+        }
+      }
+
+      // Ranking produtos mais vendidos
+      const ranking = Object.values(lucrosPorProduto).sort((a: any, b: any) => b.total - a.total).slice(0, 10)
+
+      // Vendas da semana
+      const weekDays = []
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i)
+        const dateStr = d.toISOString().split('T')[0]
+        const daySales = sales?.filter(s => s.sale_date === dateStr) || []
+        weekDays.push({ date: dateStr, day: d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''), total: daySales.reduce((s, sale) => s + sale.total_amount, 0) })
+      }
 
       const maxFlow = Math.max(totalReceived, totalPaidBills, 1000)
 
       return {
-        lowStock, stockProducts, stockValue, stockCost, stockProfit,
-        monthSales, totalMonthSales, todaySales, totalTodaySales,
-        pendingBills, totalPending,
+        lowStock, stockProducts: stockProductsWithProfit, stockValue, stockCost, stockProfit,
+        monthSales: monthSalesDetailed, totalMonthSales,
+        todaySales: todaySalesDetailed, totalTodaySales,
         boletosMes, totalBoletosMes,
         parcelasMes: parcelasComClientes, totalParcelasMes,
+        allPending: pendingWithClients, totalPending,
         paidBills, totalPaidBills,
-        receivedInstallments: receivedWithClients,
-        extraPayments: extraPayments || [],
-        totalReceived,
+        receivedInstallments: receivedWithClients, extraPayments: extraPayments || [], totalReceived,
         cashBalance: cashFlow?.current_balance || 0,
-        maxFlow,
-        totalProducts: products?.length || 0,
+        cashTransactions: cashTransactions || [],
+        totalLucroObtido, lucrosPorProduto: Object.values(lucrosPorProduto),
+        ranking, weekDays,
+        maxFlow, totalProducts: products?.length || 0,
       }
     },
     refetchOnWindowFocus: true,
@@ -111,14 +166,13 @@ export default function Dashboard() {
     const balance = parseFloat(newBalance)
     if (isNaN(balance)) return
     const { data: existing } = await supabase.from('cash_flow').select('*').single()
-    if (existing) {
-      await supabase.from('cash_flow').update({ current_balance: balance }).eq('id', existing.id)
-    } else {
-      await supabase.from('cash_flow').insert({ user_id: user?.id, current_balance: balance })
-    }
-    setEditingBalance(false)
-    refetch()
+    if (existing) await supabase.from('cash_flow').update({ current_balance: balance }).eq('id', existing.id)
+    else await supabase.from('cash_flow').insert({ user_id: user?.id, current_balance: balance })
+    setEditingBalance(false); refetch()
   }
+
+  const openModal = (title: string, type: string) => setModal({ title, type })
+  const closeModal = () => setModal(null)
 
   if (!user) return null
   if (isLoading || !data) return <div className="p-4 mb-24 max-w-2xl mx-auto"><div className="text-center py-8 text-gray-400 animate-pulse">Carregando...</div></div>
@@ -134,7 +188,6 @@ export default function Dashboard() {
         <div><h1 className="text-xl font-bold">Dashboard</h1><p className="text-xs text-gray-400">{months[selectedMonth]} {selectedYear}</p></div>
       </div>
 
-      {/* Abas meses */}
       <div className="flex gap-1 mb-4 overflow-x-auto pb-2">
         {Array.from({ length: 6 }, (_, i) => {
           const d = new Date(); d.setMonth(d.getMonth() - (5 - i))
@@ -166,158 +219,163 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <div onClick={() => setShowRecebimentos(true)} className="bg-green-50 p-2 rounded-xl cursor-pointer active:scale-95">
-            <p className="text-[10px] text-gray-500">Entradas (mês)</p>
-            <p className="text-sm font-bold text-green-600">R$ {data.totalReceived?.toFixed(0)}</p>
+          <div onClick={() => openModal('📥 Entradas do Mês', 'recebimentos')} className="bg-green-50 p-2 rounded-xl cursor-pointer active:scale-95">
+            <p className="text-[10px] text-gray-500">Entradas (mês)</p><p className="text-sm font-bold text-green-600">R$ {data.totalReceived?.toFixed(0)}</p>
           </div>
-          <div onClick={() => setShowBoletosPagos(true)} className="bg-blue-50 p-2 rounded-xl cursor-pointer active:scale-95">
-            <p className="text-[10px] text-gray-500">Boletos Pagos</p>
-            <p className="text-sm font-bold text-blue-600">R$ {data.totalPaidBills?.toFixed(0)}</p>
+          <div onClick={() => openModal('✅ Boletos Pagos', 'boletosPagos')} className="bg-blue-50 p-2 rounded-xl cursor-pointer active:scale-95">
+            <p className="text-[10px] text-gray-500">Boletos Pagos</p><p className="text-sm font-bold text-blue-600">R$ {data.totalPaidBills?.toFixed(0)}</p>
           </div>
         </div>
       </div>
 
-      {/* Grid principal */}
+      {/* Grid */}
       <div className="grid grid-cols-2 gap-2 sm:gap-3">
-        <div onClick={() => navigate('/products')} className="metric-card cursor-pointer active:scale-95"><AlertTriangle size={18} color="hsl(38, 92%, 50%)" /><p className="text-xl font-bold text-orange-500 mt-1">{data.lowStock?.length || 0}</p><p className="text-[10px] text-gray-400">Estoque Baixo</p></div>
-        
-        {/* NOVO: Boletos do Mês */}
-        <div onClick={() => setShowBoletosMes(true)} className="metric-card cursor-pointer active:scale-95">
-          <Calendar size={18} color="hsl(0, 72%, 51%)" />
-          <p className="text-lg font-bold text-red-500 mt-1">{data.boletosMes?.length || 0}</p>
-          <p className="text-[10px] text-gray-400">Boletos do Mês</p>
-          <p className="text-xs font-bold text-red-500">R$ {data.totalBoletosMes?.toFixed(0)}</p>
-        </div>
-
-        {/* NOVO: Parcelas do Mês */}
-        <div onClick={() => setShowParcelasMes(true)} className="metric-card cursor-pointer active:scale-95">
-          <CreditCard size={18} color="hsl(211, 100%, 50%)" />
-          <p className="text-lg font-bold text-blue-500 mt-1">{data.parcelasMes?.length || 0}</p>
-          <p className="text-[10px] text-gray-400">Parcelas do Mês</p>
-          <p className="text-xs font-bold text-blue-500">R$ {data.totalParcelasMes?.toFixed(0)}</p>
-        </div>
-
-        <div className="metric-card"><ShoppingCart size={18} color="hsl(211, 100%, 50%)" /><p className="text-xl font-bold text-blue-500 mt-1">R$ {data.totalTodaySales?.toFixed(0)}</p><p className="text-[10px] text-gray-400">Vendas Hoje</p></div>
-        <div className="metric-card"><TrendingUp size={18} color="hsl(142, 76%, 36%)" /><p className="text-xl font-bold text-green-600 mt-1">R$ {data.totalMonthSales?.toFixed(0)}</p><p className="text-[10px] text-gray-400">{data.monthSales?.length || 0} vendas</p></div>
-        <div className="metric-card"><Users size={18} color="hsl(38, 92%, 50%)" /><p className="text-xl font-bold text-orange-500 mt-1">R$ {data.totalPending?.toFixed(0)}</p><p className="text-[10px] text-gray-400">A Receber</p></div>
-        <div className="metric-card"><Package size={18} color="hsl(211, 100%, 50%)" /><p className="text-xl font-bold text-blue-500 mt-1">R$ {data.stockValue?.toFixed(0)}</p><p className="text-[10px] text-gray-400">{data.stockProducts?.length || 0} itens</p></div>
-        <div className="metric-card"><DollarSign size={18} color="hsl(142, 76%, 36%)" /><p className="text-xl font-bold text-green-600 mt-1">R$ {data.stockProfit?.toFixed(0)}</p><p className="text-[10px] text-gray-400">Lucro Est.</p></div>
-        <div className="metric-card"><Package size={18} color="hsl(211, 100%, 50%)" /><p className="text-xl font-bold text-blue-500 mt-1">{data.totalProducts}</p><p className="text-[10px] text-gray-400">Produtos</p></div>
+        <div onClick={() => openModal('🔴 Estoque Baixo', 'lowStock')} className="metric-card cursor-pointer active:scale-95"><AlertTriangle size={18} color="hsl(38, 92%, 50%)" /><p className="text-xl font-bold text-orange-500 mt-1">{data.lowStock?.length || 0}</p><p className="text-[10px] text-gray-400">Estoque Baixo</p></div>
+        <div onClick={() => openModal('📄 Boletos do Mês', 'boletosMes')} className="metric-card cursor-pointer active:scale-95"><Calendar size={18} color="hsl(0, 72%, 51%)" /><p className="text-lg font-bold text-red-500 mt-1">{data.boletosMes?.length || 0}</p><p className="text-[10px] text-gray-400">Boletos do Mês</p><p className="text-xs font-bold text-red-500">R$ {data.totalBoletosMes?.toFixed(0)}</p></div>
+        <div onClick={() => openModal('💳 Parcelas do Mês', 'parcelasMes')} className="metric-card cursor-pointer active:scale-95"><CreditCard size={18} color="hsl(211, 100%, 50%)" /><p className="text-lg font-bold text-blue-500 mt-1">{data.parcelasMes?.length || 0}</p><p className="text-[10px] text-gray-400">Parcelas do Mês</p><p className="text-xs font-bold text-blue-500">R$ {data.totalParcelasMes?.toFixed(0)}</p></div>
+        <div onClick={() => openModal('📅 Vendas do Dia', 'vendasDia')} className="metric-card cursor-pointer active:scale-95"><ShoppingCart size={18} color="hsl(211, 100%, 50%)" /><p className="text-xl font-bold text-blue-500 mt-1">R$ {data.totalTodaySales?.toFixed(0)}</p><p className="text-[10px] text-gray-400">Vendas Hoje</p></div>
+        <div onClick={() => openModal('💰 Vendas do Mês', 'vendasMes')} className="metric-card cursor-pointer active:scale-95"><TrendingUp size={18} color="hsl(142, 76%, 36%)" /><p className="text-xl font-bold text-green-600 mt-1">R$ {data.totalMonthSales?.toFixed(0)}</p><p className="text-[10px] text-gray-400">{data.monthSales?.length || 0} vendas</p></div>
+        <div onClick={() => openModal('🎯 Total a Receber', 'totalReceber')} className="metric-card cursor-pointer active:scale-95"><Users size={18} color="hsl(38, 92%, 50%)" /><p className="text-xl font-bold text-orange-500 mt-1">R$ {data.totalPending?.toFixed(0)}</p><p className="text-[10px] text-gray-400">A Receber</p></div>
+        <div onClick={() => openModal('📦 Valor em Estoque', 'estoque')} className="metric-card cursor-pointer active:scale-95"><Package size={18} color="hsl(211, 100%, 50%)" /><p className="text-xl font-bold text-blue-500 mt-1">R$ {data.stockValue?.toFixed(0)}</p><p className="text-[10px] text-gray-400">{data.stockProducts?.length || 0} itens</p></div>
+        <div onClick={() => openModal('📈 Lucro Estimado', 'lucroEstimado')} className="metric-card cursor-pointer active:scale-95"><DollarSign size={18} color="hsl(142, 76%, 36%)" /><p className="text-xl font-bold text-green-600 mt-1">R$ {data.stockProfit?.toFixed(0)}</p><p className="text-[10px] text-gray-400">Lucro Est.</p></div>
+        <div onClick={() => openModal('💎 Lucro Obtido', 'lucroObtido')} className="metric-card cursor-pointer active:scale-95"><DollarSign size={18} color="hsl(142, 76%, 36%)" /><p className="text-xl font-bold text-green-600 mt-1">R$ {data.totalLucroObtido?.toFixed(0)}</p><p className="text-[10px] text-gray-400">Lucro Obtido</p></div>
+        <div onClick={() => openModal('📦 Produtos Cadastrados', 'produtos')} className="metric-card cursor-pointer active:scale-95"><Package size={18} color="hsl(211, 100%, 50%)" /><p className="text-xl font-bold text-blue-500 mt-1">{data.totalProducts}</p><p className="text-[10px] text-gray-400">Produtos</p></div>
       </div>
 
-      {/* POP-UP: Recebimentos */}
-      <Dialog open={showRecebimentos} onOpenChange={setShowRecebimentos}>
+      {/* MODAL GENÉRICO */}
+      <Dialog open={!!modal} onOpenChange={() => closeModal()}>
         <DialogContent className="ios-sheet max-w-md max-h-[80vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>📥 Entradas do Mês</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{modal?.title}</DialogTitle></DialogHeader>
           <div className="space-y-2 mt-2">
-            <p className="text-sm font-bold text-green-600 mb-2">Total: R$ {data.totalReceived?.toFixed(2)}</p>
-            {data.receivedInstallments?.length === 0 && data.extraPayments?.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">Nenhum recebimento no período</p>
-            ) : (
+            {/* Recebimentos */}
+            {modal?.type === 'recebimentos' && (
               <>
+                <p className="text-sm font-bold text-green-600 mb-2">Total: R$ {data.totalReceived?.toFixed(2)}</p>
                 {data.receivedInstallments?.map((inst: any) => (
-                  <div key={inst.id} className="bg-green-50 p-3 rounded-xl">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <p className="text-sm font-medium">{inst.client_name}</p>
-                        <p className="text-xs text-gray-500">Parcela {inst.installment_number}x - {new Date(inst.payment_date).toLocaleDateString('pt-BR')}</p>
-                      </div>
-                      <p className="font-bold text-green-700">R$ {(inst.paid_amount || inst.amount)?.toFixed(2)}</p>
-                    </div>
-                  </div>
+                  <div key={inst.id} className="bg-green-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{inst.client_name}</p><p className="text-xs text-gray-500">Parcela {inst.installment_number}x - {new Date(inst.payment_date).toLocaleDateString('pt-BR')}</p></div><p className="font-bold text-green-700">R$ {(inst.paid_amount || inst.amount)?.toFixed(2)}</p></div></div>
                 ))}
                 {data.extraPayments?.map((ep: any) => (
-                  <div key={ep.id} className="bg-green-50 p-3 rounded-xl border border-green-200">
-                    <div className="flex justify-between items-center">
-                      <div><p className="text-sm font-medium">{ep.clients?.name || 'Cliente'}</p><p className="text-xs text-gray-500">Pagamento Avulso - {new Date(ep.created_at).toLocaleDateString('pt-BR')}</p></div>
-                      <p className="font-bold text-green-700">R$ {ep.amount?.toFixed(2)}</p>
-                    </div>
-                  </div>
+                  <div key={ep.id} className="bg-green-50 p-3 rounded-xl border border-green-200"><div className="flex justify-between"><div><p className="text-sm font-medium">{ep.clients?.name}</p><p className="text-xs text-gray-500">Avulso - {new Date(ep.created_at).toLocaleDateString('pt-BR')}</p></div><p className="font-bold text-green-700">R$ {ep.amount?.toFixed(2)}</p></div></div>
+                ))}
+                {!data.receivedInstallments?.length && !data.extraPayments?.length && <p className="text-sm text-gray-400 text-center py-4">Nenhum recebimento</p>}
+              </>
+            )}
+
+            {/* Boletos Pagos */}
+            {modal?.type === 'boletosPagos' && (
+              <>
+                <p className="text-sm font-bold text-blue-600 mb-2">Total: R$ {data.totalPaidBills?.toFixed(2)}</p>
+                {data.paidBills?.map((bill: any) => (
+                  <div key={bill.id} className="bg-blue-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{bill.supplier}</p><p className="text-xs text-gray-500">Pago: {new Date(bill.payment_date).toLocaleDateString('pt-BR')}</p></div><p className="font-bold text-blue-700">R$ {(bill.paid_amount || bill.amount)?.toFixed(2)}</p></div></div>
+                ))}
+                {!data.paidBills?.length && <p className="text-sm text-gray-400 text-center py-4">Nenhum boleto pago</p>}
+              </>
+            )}
+
+            {/* Boletos do Mês */}
+            {modal?.type === 'boletosMes' && (
+              <>
+                <p className="text-sm font-bold text-red-600 mb-2">{data.boletosMes?.length} boleto(s) - Total: R$ {data.totalBoletosMes?.toFixed(2)}</p>
+                {data.boletosMes?.sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()).map((bill: any) => (
+                  <div key={bill.id} className="bg-red-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{bill.supplier}</p><p className="text-xs text-gray-500">Venc: {new Date(bill.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p></div><p className="font-bold text-red-700">R$ {bill.amount?.toFixed(2)}</p></div></div>
+                ))}
+                {!data.boletosMes?.length && <p className="text-sm text-gray-400 text-center py-4">Nenhum boleto 🎉</p>}
+              </>
+            )}
+
+            {/* Parcelas do Mês */}
+            {modal?.type === 'parcelasMes' && (
+              <>
+                <p className="text-sm font-bold text-blue-600 mb-2">{data.parcelasMes?.length} parcela(s) - Total: R$ {data.totalParcelasMes?.toFixed(2)}</p>
+                {data.parcelasMes?.sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()).map((inst: any) => (
+                  <div key={inst.id} className="bg-blue-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{inst.client_name}</p><p className="text-xs text-gray-500">{inst.installment_number}x - Venc: {new Date(inst.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p></div><p className="font-bold text-blue-700">R$ {(inst.amount - (inst.paid_amount || 0))?.toFixed(2)}</p></div></div>
+                ))}
+                {!data.parcelasMes?.length && <p className="text-sm text-gray-400 text-center py-4">Nenhuma parcela 🎉</p>}
+              </>
+            )}
+
+            {/* Estoque Baixo */}
+            {modal?.type === 'lowStock' && (
+              <>
+                {data.lowStock?.map((p: any) => (
+                  <div key={p.id} className="bg-orange-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{p.name}</p><p className="text-xs text-gray-500">SKU: {p.sku} | Mín: {p.min_stock || 5}</p></div><p className="font-bold text-orange-600">{p.quantity} un.</p></div></div>
+                ))}
+                {!data.lowStock?.length && <p className="text-sm text-gray-400 text-center py-4">Todos com estoque ok!</p>}
+              </>
+            )}
+
+            {/* Vendas do Dia */}
+            {modal?.type === 'vendasDia' && (
+              <>
+                <p className="text-sm font-bold text-blue-600 mb-2">Total: R$ {data.totalTodaySales?.toFixed(2)}</p>
+                {data.todaySales?.map((s: any) => (
+                  <div key={s.id} className="bg-blue-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{s.client_name}</p><p className="text-xs text-gray-500">{new Date(s.sale_date).toLocaleDateString('pt-BR')}</p>{s.items?.map((i: any) => <span key={i.id} className="text-[10px] text-gray-400 block">{i.product?.name} x{i.quantity}</span>)}</div><p className="font-bold text-blue-700">R$ {s.total_amount?.toFixed(2)}</p></div></div>
+                ))}
+                {!data.todaySales?.length && <p className="text-sm text-gray-400 text-center py-4">Nenhuma venda hoje</p>}
+              </>
+            )}
+
+            {/* Vendas do Mês */}
+            {modal?.type === 'vendasMes' && (
+              <>
+                <p className="text-sm font-bold text-green-600 mb-2">Total: R$ {data.totalMonthSales?.toFixed(2)}</p>
+                {data.monthSales?.map((s: any) => (
+                  <div key={s.id} className="bg-green-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{s.client_name}</p><p className="text-xs text-gray-500">{new Date(s.sale_date).toLocaleDateString('pt-BR')}</p></div><p className="font-bold text-green-700">R$ {s.total_amount?.toFixed(2)}</p></div></div>
+                ))}
+                {!data.monthSales?.length && <p className="text-sm text-gray-400 text-center py-4">Nenhuma venda no mês</p>}
+              </>
+            )}
+
+            {/* Total a Receber */}
+            {modal?.type === 'totalReceber' && (
+              <>
+                <p className="text-sm font-bold text-orange-600 mb-2">Total: R$ {data.totalPending?.toFixed(2)}</p>
+                {data.allPending?.sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()).map((inst: any) => (
+                  <div key={inst.id} className="bg-orange-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{inst.client_name}</p><p className="text-xs text-gray-500">{inst.installment_number}x - Venc: {new Date(inst.due_date).toLocaleDateString('pt-BR')}</p></div><p className="font-bold text-orange-700">R$ {(inst.amount - (inst.paid_amount || 0))?.toFixed(2)}</p></div></div>
+                ))}
+                {!data.allPending?.length && <p className="text-sm text-gray-400 text-center py-4">Nada a receber 🎉</p>}
+              </>
+            )}
+
+            {/* Estoque */}
+            {modal?.type === 'estoque' && (
+              <>
+                <p className="text-sm font-bold text-blue-600 mb-2">Total Venda: R$ {data.stockValue?.toFixed(2)} | Custo: R$ {data.stockCost?.toFixed(2)}</p>
+                {data.stockProducts?.map((p: any) => (
+                  <div key={p.id} className="bg-blue-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{p.name}</p><p className="text-xs text-gray-500">Qtd: {p.quantity} | Un: R$ {p.sale_price?.toFixed(2)}</p></div><p className="font-bold text-blue-700">R$ {(p.sale_price * p.quantity)?.toFixed(2)}</p></div></div>
                 ))}
               </>
             )}
-          </div>
-        </DialogContent>
-      </Dialog>
 
-      {/* POP-UP: Boletos Pagos */}
-      <Dialog open={showBoletosPagos} onOpenChange={setShowBoletosPagos}>
-        <DialogContent className="ios-sheet max-w-md max-h-[80vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>✅ Boletos Pagos</DialogTitle></DialogHeader>
-          <div className="space-y-2 mt-2">
-            <p className="text-sm font-bold text-blue-600 mb-2">Total: R$ {data.totalPaidBills?.toFixed(2)}</p>
-            {data.paidBills?.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">Nenhum boleto pago no período</p>
-            ) : (
-              data.paidBills.map((bill: any) => (
-                <div key={bill.id} className="bg-blue-50 p-3 rounded-xl">
-                  <div className="flex justify-between items-center">
-                    <div><p className="text-sm font-medium">{bill.supplier}</p><p className="text-xs text-gray-500">Pago em: {new Date(bill.payment_date).toLocaleDateString('pt-BR')}</p><p className="text-xs text-gray-400">Venc: {new Date(bill.due_date).toLocaleDateString('pt-BR')}</p></div>
-                    <p className="font-bold text-blue-700">R$ {(bill.paid_amount || bill.amount)?.toFixed(2)}</p>
-                  </div>
-                </div>
-              ))
+            {/* Lucro Estimado */}
+            {modal?.type === 'lucroEstimado' && (
+              <>
+                <p className="text-sm font-bold text-green-600 mb-2">Lucro Total: R$ {data.stockProfit?.toFixed(2)}</p>
+                {data.stockProducts?.map((p: any) => (
+                  <div key={p.id} className="bg-green-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{p.name}</p><p className="text-xs text-gray-500">Qtd: {p.quantity} | Lucro un: R$ {p.profitUnit?.toFixed(2)}</p></div><p className="font-bold text-green-700">R$ {p.profit?.toFixed(2)}</p></div></div>
+                ))}
+              </>
             )}
-          </div>
-        </DialogContent>
-      </Dialog>
 
-      {/* POP-UP: Boletos do Mês */}
-      <Dialog open={showBoletosMes} onOpenChange={setShowBoletosMes}>
-        <DialogContent className="ios-sheet max-w-md max-h-[80vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>📄 Boletos do Mês</DialogTitle></DialogHeader>
-          <div className="space-y-2 mt-2">
-            <div className="flex justify-between items-center mb-2">
-              <p className="text-sm text-gray-500">{data.boletosMes?.length || 0} boleto(s)</p>
-              <p className="text-sm font-bold text-red-600">Total: R$ {data.totalBoletosMes?.toFixed(2)}</p>
-            </div>
-            {data.boletosMes?.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">Nenhum boleto este mês 🎉</p>
-            ) : (
-              data.boletosMes
-                .sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
-                .map((bill: any) => (
-                <div key={bill.id} className="bg-red-50 p-3 rounded-xl border border-red-200">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="text-sm font-medium">{bill.supplier}</p>
-                      <p className="text-xs text-gray-500">Venc: {new Date(bill.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p>
-                      {bill.notes && <p className="text-[10px] text-gray-400">{bill.notes}</p>}
-                    </div>
-                    <p className="font-bold text-red-700">R$ {bill.amount?.toFixed(2)}</p>
-                  </div>
-                </div>
-              ))
+            {/* Lucro Obtido */}
+            {modal?.type === 'lucroObtido' && (
+              <>
+                <p className="text-sm font-bold text-green-600 mb-2">Total: R$ {data.totalLucroObtido?.toFixed(2)}</p>
+                {(data.lucrosPorProduto as any[])?.map((item: any, i: number) => (
+                  <div key={i} className="bg-green-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{item.name}</p><p className="text-xs text-gray-500">{item.quantity} un. vendidas</p></div><p className="font-bold text-green-700">R$ {item.lucro?.toFixed(2)}</p></div></div>
+                ))}
+                {!data.lucrosPorProduto?.length && <p className="text-sm text-gray-400 text-center py-4">Nenhum lucro registrado</p>}
+              </>
             )}
-          </div>
-        </DialogContent>
-      </Dialog>
 
-      {/* POP-UP: Parcelas do Mês */}
-      <Dialog open={showParcelasMes} onOpenChange={setShowParcelasMes}>
-        <DialogContent className="ios-sheet max-w-md max-h-[80vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>💳 Parcelas a Receber</DialogTitle></DialogHeader>
-          <div className="space-y-2 mt-2">
-            <div className="flex justify-between items-center mb-2">
-              <p className="text-sm text-gray-500">{data.parcelasMes?.length || 0} parcela(s)</p>
-              <p className="text-sm font-bold text-blue-600">Total: R$ {data.totalParcelasMes?.toFixed(2)}</p>
-            </div>
-            {data.parcelasMes?.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">Nenhuma parcela este mês 🎉</p>
-            ) : (
-              data.parcelasMes
-                .sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
-                .map((inst: any) => (
-                <div key={inst.id} className="bg-blue-50 p-3 rounded-xl border border-blue-200">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="text-sm font-medium">{inst.client_name}</p>
-                      <p className="text-xs text-gray-500">{inst.installment_number}x - Venc: {new Date(inst.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p>
-                    </div>
-                    <p className="font-bold text-blue-700">R$ {(inst.amount - (inst.paid_amount || 0))?.toFixed(2)}</p>
-                  </div>
-                </div>
-              ))
+            {/* Produtos */}
+            {modal?.type === 'produtos' && (
+              <>
+                <p className="text-sm font-bold text-blue-600 mb-2">{data.totalProducts} produtos cadastrados</p>
+                {data.stockProducts?.map((p: any) => (
+                  <div key={p.id} className="bg-gray-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{p.name}</p><p className="text-xs text-gray-500">SKU: {p.sku} | Estoque: {p.quantity}</p></div><p className="text-sm">R$ {p.sale_price?.toFixed(2)}</p></div></div>
+                ))}
+              </>
             )}
           </div>
         </DialogContent>
