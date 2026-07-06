@@ -36,7 +36,7 @@ export function useNotifications() {
       new Notification(title, {
         body,
         icon: 'https://i.imgur.com/0Q6tNuR.jpeg',
-        vibrate: [200, 100, 200],
+        vibrate: type === 'boleto' ? [300, 100, 300, 100, 300] : [200, 100, 200],
         requireInteraction: true,
         tag: type,
       })
