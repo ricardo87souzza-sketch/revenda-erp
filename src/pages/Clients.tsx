@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import html2canvas from 'html2canvas'
-import { ShareCard } from '@/components/clients/ShareCard'
 
 export default function Clients() {
   const [search, setSearch] = useState('')
@@ -20,10 +19,14 @@ export default function Clients() {
   const [clientHistory, setClientHistory] = useState<any>(null)
   const [extraAmount, setExtraAmount] = useState('')
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '' })
-  const shareCardRef = useRef<HTMLDivElement>(null)
+  const shareRef = useRef<HTMLDivElement>(null)
   const { user } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+
+  const formatMoney = (value: number) => {
+    return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
 
   const { data: clients = [], refetch: refetchClients } = useQuery({
     queryKey: ['clients'],
@@ -142,7 +145,7 @@ export default function Clients() {
           payment_method: 'dinheiro', notes: 'Pagamento avulso'
         })
 
-        alert(`Pagamento de R$ ${amount.toFixed(2)} registrado!`)
+        alert(`Pagamento de R$ ${formatMoney(amount)} registrado!`)
         setShowExtraPayment(false); setExtraAmount('')
         setTimeout(() => {
           openHistory(selectedClient)
@@ -161,9 +164,9 @@ export default function Clients() {
     if (!clientHistory?.sales?.length) return alert('Nenhuma venda!')
     
     setTimeout(async () => {
-      if (shareCardRef.current) {
+      if (shareRef.current) {
         try {
-          const canvas = await html2canvas(shareCardRef.current, { scale: 3, backgroundColor: null })
+          const canvas = await html2canvas(shareRef.current, { scale: 3, backgroundColor: '#ffffff' })
           canvas.toBlob(async (blob) => {
             if (blob) {
               const file = new File([blob], 'venda.png', { type: 'image/png' })
@@ -171,7 +174,7 @@ export default function Clients() {
                 await navigator.share({ files: [file], title: `Venda - ${selectedClient.name}` })
               } else {
                 const sale = clientHistory.sales[0]
-                const text = `📋 *${selectedClient.name}*\n💰 Total: R$ ${sale.total_amount?.toFixed(2)}\n📅 ${new Date(sale.sale_date).toLocaleDateString('pt-BR')}`
+                const text = `📋 *${selectedClient.name}*\n💰 Total: R$ ${formatMoney(sale.total_amount || 0)}\n📅 ${new Date(sale.sale_date).toLocaleDateString('pt-BR')}`
                 window.open(`https://wa.me/55${selectedClient.phone?.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank')
               }
             }
@@ -210,19 +213,12 @@ export default function Clients() {
 
   return (
     <div className="p-3 sm:p-4 mb-24 max-w-2xl mx-auto">
-      <ShareCard
-        ref={shareCardRef}
-        clientName={selectedClient?.name || ''}
-        sale={clientHistory?.sales?.[0]}
-        totalPending={clientHistory?.totalPending || 0}
-      />
-
       <h1 className="text-xl font-bold mb-4">👥 Clientes</h1>
 
       <div className="grid grid-cols-3 gap-2 mb-4">
         <div className="metric-card text-center"><p className="text-lg font-bold text-blue-500">{clients.length}</p><p className="text-[10px] text-gray-400">Total</p></div>
         <div className="metric-card text-center"><p className="text-lg font-bold text-orange-500">{clients.filter((c: any) => c.total_pending > 0).length}</p><p className="text-[10px] text-gray-400">Pendentes</p></div>
-        <div className="metric-card text-center"><p className="text-lg font-bold text-green-600">R$ {clients.reduce((s: number, c: any) => s + (c.total_paid || 0), 0).toFixed(0)}</p><p className="text-[10px] text-gray-400">Pago</p></div>
+        <div className="metric-card text-center"><p className="text-lg font-bold text-green-600">R$ {formatMoney(clients.reduce((s: number, c: any) => s + (c.total_paid || 0), 0))}</p><p className="text-[10px] text-gray-400">Pago</p></div>
       </div>
 
       <div className="relative mb-4">
@@ -237,8 +233,8 @@ export default function Clients() {
           {filtered.map((client: any) => (
             <div key={client.id} onClick={() => openHistory(client)} className="ios-list-item cursor-pointer border-l-4 border-l-blue-400">
               <div className="flex justify-between items-start">
-                <div><h3 className="font-semibold text-sm">{client.name}</h3>{client.phone && <p className="text-xs text-gray-400">📱 {client.phone}</p>}<p className="text-[10px] text-gray-400 mt-0.5">Compras: R$ {(client.total_purchases || 0).toFixed(0)}</p></div>
-                {client.total_pending > 0 && <span className="text-[10px] bg-red-50 text-red-500 px-2 py-0.5 rounded-full font-bold">R$ {client.total_pending.toFixed(0)}</span>}
+                <div><h3 className="font-semibold text-sm">{client.name}</h3>{client.phone && <p className="text-xs text-gray-400">📱 {client.phone}</p>}<p className="text-[10px] text-gray-400 mt-0.5">Compras: R$ {formatMoney(client.total_purchases || 0)}</p></div>
+                {client.total_pending > 0 && <span className="text-[10px] bg-red-50 text-red-500 px-2 py-0.5 rounded-full font-bold">R$ {formatMoney(client.total_pending || 0)}</span>}
               </div>
             </div>
           ))}
@@ -247,32 +243,69 @@ export default function Clients() {
 
       <button onClick={() => { setEditingClient(null); setForm({ name: '', phone: '', email: '', address: '', notes: '' }); setShowForm(true) }} className="fab"><Plus size={24} /></button>
 
+      {/* Modal Histórico */}
       <Dialog open={showHistory} onOpenChange={setShowHistory}>
         <DialogContent className="ios-sheet max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{selectedClient?.name}</DialogTitle></DialogHeader>
           {clientHistory ? (
             <div className="space-y-3 mt-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-green-50 p-3 rounded-xl text-center"><p className="text-[10px]">Total Pago</p><p className="text-lg font-bold text-green-700">R$ {clientHistory.totalPaid.toFixed(2)}</p></div>
-                <div className="bg-red-50 p-3 rounded-xl text-center"><p className="text-[10px]">Pendente</p><p className="text-lg font-bold text-red-600">R$ {clientHistory.totalPending.toFixed(2)}</p></div>
-              </div>
-              {clientHistory.sales.map((sale: any) => (
-                <div key={sale.id} className="bg-gray-50 p-3 rounded-xl">
-                  <div className="flex justify-between text-sm mb-1"><span>{new Date(sale.sale_date).toLocaleDateString('pt-BR')}</span><b>R$ {sale.total_amount?.toFixed(2)}</b></div>
-                  {sale.items?.map((item: any) => <div key={item.id} className="flex justify-between text-xs text-gray-500 ml-2">{item.product_name} x{item.quantity}<span>R$ {item.total_price?.toFixed(2)}</span></div>)}
-                  {(sale.installments || []).length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      {sale.installments.map((inst: any) => (
-                        <div key={inst.id} className="flex items-center justify-between bg-white p-2 rounded-lg">
-                          <span className="text-xs">{inst.installment_number}x R$ {(inst.amount - (inst.paid_amount || 0)).toFixed(2)} - {new Date(inst.due_date).toLocaleDateString('pt-BR')}</span>
-                          {inst.status === 'pendente' ? <button onClick={() => handlePayInstallment(inst)} className="text-[10px] bg-red-500 text-white px-2 py-1 rounded-full font-bold hover:bg-green-500">PENDENTE</button>
-                          : <span className="text-[10px] bg-green-500 text-white px-2 py-1 rounded-full font-bold">PAGO ✓</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+              {/* Conteúdo para compartilhar */}
+              <div ref={shareRef} style={{ backgroundColor: '#ffffff', padding: '16px', borderRadius: '16px' }}>
+                {/* Cabeçalho */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '2px solid #e5e7eb', paddingBottom: '8px' }}>
+                  <div>
+                    <h2 style={{ fontSize: '16px', fontWeight: 'bold', color: '#1f2937', margin: 0 }}>{selectedClient?.name}</h2>
+                    {selectedClient?.phone && <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>📱 {selectedClient?.phone}</p>}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Revenda ERP</p>
+                  </div>
                 </div>
-              ))}
+
+                {/* Cards totais */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                  <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '10px', textAlign: 'center', border: '1px solid #bbf7d0' }}>
+                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '0 0 4px 0' }}>Total Pago</p>
+                    <p style={{ fontSize: '16px', fontWeight: 'bold', color: '#15803d', margin: 0 }}>R$ {formatMoney(clientHistory.totalPaid || 0)}</p>
+                  </div>
+                  <div style={{ background: '#fef2f2', padding: '10px', borderRadius: '10px', textAlign: 'center', border: '1px solid #fecaca' }}>
+                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '0 0 4px 0' }}>Total Pendente</p>
+                    <p style={{ fontSize: '16px', fontWeight: 'bold', color: '#dc2626', margin: 0 }}>R$ {formatMoney(clientHistory.totalPending || 0)}</p>
+                  </div>
+                </div>
+
+                {/* Histórico */}
+                {clientHistory.sales.map((sale: any) => (
+                  <div key={sale.id} style={{ background: '#f9fafb', padding: '10px', borderRadius: '10px', marginBottom: '8px', border: '1px solid #e5e7eb' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '12px', color: '#6b7280' }}>{new Date(sale.sale_date).toLocaleDateString('pt-BR')}</span>
+                      <b style={{ fontSize: '14px', color: '#1f2937' }}>R$ {formatMoney(sale.total_amount || 0)}</b>
+                    </div>
+                    {sale.items?.map((item: any) => (
+                      <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#6b7280', marginLeft: '8px', marginBottom: '2px' }}>
+                        <span>{item.product_name} x{item.quantity}</span>
+                        <span>R$ {formatMoney(item.total_price || 0)}</span>
+                      </div>
+                    ))}
+                    {(sale.installments || []).length > 0 && (
+                      <div style={{ marginTop: '6px' }}>
+                        {sale.installments.map((inst: any) => (
+                          <div key={inst.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '6px 8px', borderRadius: '8px', marginBottom: '3px', border: '1px solid #e5e7eb' }}>
+                            <span style={{ fontSize: '11px', color: '#374151' }}>
+                              {inst.installment_number}x R$ {formatMoney((inst.amount || 0) - (inst.paid_amount || 0))} - {new Date(inst.due_date).toLocaleDateString('pt-BR')}
+                            </span>
+                            <span style={{ fontSize: '10px', fontWeight: 'bold', padding: '2px 8px', borderRadius: '20px', backgroundColor: inst.status === 'pago' ? '#22c55e' : '#ef4444', color: 'white' }}>
+                              {inst.status === 'pago' ? 'PAGO ✓' : 'PENDENTE'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Botões de ação (fora da imagem) */}
               <div className="grid grid-cols-4 gap-1.5 pt-2">
                 <Button onClick={() => setShowExtraPayment(true)} className="bg-green-600 hover:bg-green-700 text-white text-[10px] h-9 px-0.5">💵 Avulso</Button>
                 <Button onClick={handleShare} className="bg-blue-500 hover:bg-blue-600 text-white text-[10px] h-9 px-0.5">📤 Zap</Button>
@@ -284,11 +317,12 @@ export default function Clients() {
         </DialogContent>
       </Dialog>
 
+      {/* Modal Pagamento Avulso */}
       <Dialog open={showExtraPayment} onOpenChange={setShowExtraPayment}>
         <DialogContent className="ios-sheet max-w-sm">
           <DialogHeader><DialogTitle>Pagamento Avulso</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
-            <p className="text-sm">Pendente: R$ {clientHistory?.totalPending.toFixed(2)}</p>
+            <p className="text-sm">Pendente: R$ {formatMoney(clientHistory?.totalPending || 0)}</p>
             <p className="text-xs text-gray-400">Abate nas parcelas mais antigas primeiro.</p>
             <Input type="number" step="0.01" value={extraAmount} onChange={e => setExtraAmount(e.target.value)} placeholder="Valor" autoFocus />
             <div className="flex gap-2"><Button variant="outline" className="flex-1" onClick={() => setShowExtraPayment(false)}>Cancelar</Button><Button className="flex-1 bg-green-600" onClick={handleExtraPayment}>Pagar</Button></div>
@@ -296,6 +330,7 @@ export default function Clients() {
         </DialogContent>
       </Dialog>
 
+      {/* Modal Cadastro/Edição */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="ios-sheet max-w-md">
           <DialogHeader><DialogTitle>{editingClient ? 'Editar' : 'Novo'} Cliente</DialogTitle></DialogHeader>
