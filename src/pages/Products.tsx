@@ -83,10 +83,9 @@ export default function Products() {
     <div className="px-3 py-4 mb-24 max-w-lg mx-auto">
       <h1 className="text-lg font-bold mb-3">📦 Produtos</h1>
 
-      {/* Cards resumo - mais compactos */}
       <div className="grid grid-cols-3 gap-2 mb-3">
         <div className="metric-card text-center !p-2">
-          <p className="text-base font-bold text-[hsl(211,100%,50%)]">{totalStock}</p>
+          <p className="text-base font-bold text-blue-500">{totalStock}</p>
           <p className="text-[10px] text-gray-400">Estoque</p>
         </div>
         <div className="metric-card text-center !p-2">
@@ -99,20 +98,17 @@ export default function Products() {
         </div>
       </div>
 
-      {/* Busca */}
       <div className="relative mb-3">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <Input placeholder="Buscar por nome ou SKU..." value={search} onChange={e => setSearch(e.target.value)}
-          className="pl-9 h-10 text-sm bg-white/60" />
+        <Input placeholder="Buscar por nome ou SKU..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 h-10 text-sm bg-white/60" />
       </div>
 
-      {/* Lista compacta */}
       {isLoading ? <p className="text-center py-8 text-gray-400">Carregando...</p> :
        products.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           <p className="text-3xl mb-2">📭</p>
           <p className="text-sm">Nenhum produto</p>
-          <Button onClick={openNewForm} className="mt-3 bg-[hsl(211,100%,50%)] h-9 text-sm">Cadastrar</Button>
+          <Button onClick={openNewForm} className="mt-3 bg-blue-500 h-9 text-sm">Cadastrar</Button>
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -123,8 +119,10 @@ export default function Products() {
 
             return (
               <div key={product.id} onClick={() => openEditForm(product)}
-                className={`ios-list-item !p-3 cursor-pointer border-l-[3px] ${
-                  inStock ? 'border-l-green-500' : 'border-l-red-500 bg-red-50/50'
+                className={`ios-list-item !p-3 cursor-pointer border-l-4 ${
+                  inStock 
+                    ? 'border-l-green-500 shadow-[0_0_12px_rgba(34,197,94,0.15)]' 
+                    : 'border-l-red-500 bg-red-50/50 shadow-[0_0_12px_rgba(239,68,68,0.15)]'
                 }`}>
                 <div className="flex items-center gap-2">
                   <span className="text-lg flex-shrink-0">{inStock ? '📦' : '📭'}</span>
@@ -167,7 +165,7 @@ export default function Products() {
             <Input placeholder="Descrição" value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="h-10" />
             <div className="flex gap-2 pt-1">
               <Button type="button" variant="outline" className="flex-1 h-10" onClick={() => setShowForm(false)}>Cancelar</Button>
-              <Button type="submit" className="flex-1 h-10 bg-[hsl(211,100%,50%)]">{editingProduct ? 'Atualizar' : 'Criar'}</Button>
+              <Button type="submit" className="flex-1 h-10 bg-blue-500">{editingProduct ? 'Atualizar' : 'Criar'}</Button>
             </div>
           </form>
         </DialogContent>
