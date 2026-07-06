@@ -80,12 +80,16 @@ export default function Clients() {
       let totalPaid = 0
       let totalPending = 0
 
-      salesWithDetails.forEach(sale => {
+            salesWithDetails.forEach(sale => {
         const insts = sale.installments || []
         if (insts.length > 0) {
           insts.forEach((inst: any) => {
-            if (inst.status === 'pago') totalPaid += (inst.paid_amount || inst.amount)
-            else totalPending += (inst.amount - (inst.paid_amount || 0))
+            // Total pago = tudo que já foi pago (mesmo que parcial)
+            totalPaid += (inst.paid_amount || 0)
+            // Se não está totalmente pago, o restante é pendente
+            if (inst.status !== 'pago') {
+              totalPending += (inst.amount - (inst.paid_amount || 0))
+            }
           })
         } else {
           if (sale.payment_method !== 'a_prazo') totalPaid += sale.total_amount
