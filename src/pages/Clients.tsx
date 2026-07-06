@@ -28,8 +28,13 @@ export default function Clients() {
   const { data: clients = [], refetch: refetchClients } = useQuery({
     queryKey: ['clients'],
     queryFn: async () => {
-      const { data } = await supabase.from('clients').select('*').order('name')
-      return data || []
+      const { data } = await supabase.from('clients').select('*')
+      if (data) {
+        const comCompras = data.filter(c => c.total_purchases > 0).sort((a, b) => b.total_purchases - a.total_purchases)
+        const semCompras = data.filter(c => c.total_purchases === 0).sort((a, b) => a.name.localeCompare(b.name))
+        return [...comCompras, ...semCompras]
+      }
+      return []
     },
     enabled: !!user,
   })
@@ -205,7 +210,6 @@ export default function Clients() {
 
   return (
     <div className="p-3 sm:p-4 mb-24 max-w-2xl mx-auto">
-      {/* Card oculto para gerar imagem */}
       <ShareCard
         ref={shareCardRef}
         clientName={selectedClient?.name || ''}
@@ -243,7 +247,6 @@ export default function Clients() {
 
       <button onClick={() => { setEditingClient(null); setForm({ name: '', phone: '', email: '', address: '', notes: '' }); setShowForm(true) }} className="fab"><Plus size={24} /></button>
 
-      {/* Modal Histórico */}
       <Dialog open={showHistory} onOpenChange={setShowHistory}>
         <DialogContent className="ios-sheet max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{selectedClient?.name}</DialogTitle></DialogHeader>
@@ -281,7 +284,6 @@ export default function Clients() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal Pagamento Avulso */}
       <Dialog open={showExtraPayment} onOpenChange={setShowExtraPayment}>
         <DialogContent className="ios-sheet max-w-sm">
           <DialogHeader><DialogTitle>Pagamento Avulso</DialogTitle></DialogHeader>
@@ -294,7 +296,6 @@ export default function Clients() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal Cadastro/Edição */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="ios-sheet max-w-md">
           <DialogHeader><DialogTitle>{editingClient ? 'Editar' : 'Novo'} Cliente</DialogTitle></DialogHeader>
