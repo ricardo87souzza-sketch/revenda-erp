@@ -105,7 +105,7 @@ export default function Bills() {
               <div className="flex gap-2 mt-2">
                 {bill.status === 'pendente' && <Button onClick={() => handlePay(bill)} className="flex-1 bg-[hsl(142,76%,36%)] text-xs">💰 Pagar</Button>}
                 <Button onClick={() => openEdit(bill)} className="flex-1 bg-[hsl(211,100%,50%)] text-xs"><Pencil size={12} className="mr-1" /> Editar</Button>
-                <Button onClick={() => handleDelete(bill.id)} className="flex-1 bg-[hsl(0,72%,51%)] text-xs"><Trash2 size={12} className="mr-1" /> Apagar</Button>
+                <Button onClick={() => handleDelete(bill.id)} className="flex-1 bg-[hsl(0,72%,51%)] text-xs"><Trash2 size={12} className="mr-1" /> Excluir</Button>
               </div>
             </div>
           ))}
