@@ -21,9 +21,9 @@ export function AlertChecker() {
     // Verificar a cada 30 minutos
     const checkAlerts = async () => {
       const today = new Date().toISOString().split('T')[0]
-      const threeDaysFromNow = new Date()
-      threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3)
-      const alertDate = threeDaysFromNow.toISOString().split('T')[0]
+      const oneDayFromNow = new Date()
+      oneDayFromNow.setDate(oneDayFromNow.getDate() + 1)
+      const alertDate = oneDayFromNow.toISOString().split('T')[0]
 
       // Boletos a vencer em até 3 dias
       const { data: bills } = await supabase
