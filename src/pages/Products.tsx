@@ -121,8 +121,8 @@ export default function Products() {
               <div key={product.id} onClick={() => openEditForm(product)}
                 className={`ios-list-item !p-3 cursor-pointer border-l-4 ${
                   inStock 
-                    ? 'border-l-green-500 shadow-[0_0_12px_rgba(34,197,94,0.15)]' 
-                    : 'border-l-red-500 bg-red-50/50 shadow-[0_0_12px_rgba(239,68,68,0.15)]'
+                    ? 'border-l-green-500 shadow-[0_0_20px_rgba(34,197,94,0.4)] ring-1 ring-green-300' 
+                    : 'border-l-red-500 bg-red-50/50 shadow-[0_0_20px_rgba(239,68,68,0.4)] ring-1 ring-red-300''
                 }`}>
                 <div className="flex items-center gap-2">
                   <span className="text-lg flex-shrink-0">{inStock ? '📦' : '📭'}</span>
