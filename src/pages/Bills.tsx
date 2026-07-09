@@ -20,8 +20,13 @@ export default function Bills() {
   useEffect(() => { if (!user) navigate('/auth'); else loadBills() }, [])
 
   const loadBills = async () => {
-    const { data } = await supabase.from('bills').select('*').order('due_date', { ascending: true })
-    if (data) setBills(data)
+    const { data } = await supabase.from('bills').select('*')
+    if (data) {
+      // Pendentes primeiro (ordenados por vencimento), pagos depois
+      const pendentes = data.filter(b => b.status === 'pendente').sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+      const pagos = data.filter(b => b.status === 'pago').sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
+      setBills([...pendentes, ...pagos])
+    }
     setLoading(false)
   }
 
