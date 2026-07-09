@@ -230,10 +230,41 @@ export default function Dashboard() {
           <DialogHeader><DialogTitle>{modal?.title}</DialogTitle></DialogHeader>
           <div className="space-y-2 mt-2">
             {/* RECEBIMENTOS - ORDENADOS POR MAIS RECENTES */}
-            {modal?.type === 'recebimentos' && (<><p className="text-sm font-bold text-green-600 mb-2">Total: R$ {formatMoney(data.totalReceived || 0)}</p>
-              {[...(data.receivedInstallments || [])].sort((a: any, b: any) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime()).map((inst: any) => (<div key={inst.id} className="bg-green-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{inst.client_name}</p><p className="text-xs text-gray-500">Parcela {inst.installment_number}x - {new Date(inst.payment_date).toLocaleDateString('pt-BR')}</p></div><p className="font-bold text-green-700">R$ {formatMoney(inst.paid_amount || inst.amount || 0)}</p></div></div>))}
-              {[...(data.extraPayments || [])].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((ep: any) => (<div key={ep.id} className="bg-green-50 p-3 rounded-xl border border-green-200"><div className="flex justify-between"><div><p className="text-sm font-medium">{ep.clients?.name}</p><p className="text-xs text-gray-500">Avulso - {new Date(ep.created_at).toLocaleDateString('pt-BR')}</p></div><p className="font-bold text-green-700">R$ {formatMoney(ep.amount || 0)}</p></div></div>))}
-              {!data.receivedInstallments?.length && !data.extraPayments?.length && <p className="text-sm text-gray-400 text-center py-4">Nenhum recebimento</p>}</>)}
+                        {modal?.type === 'recebimentos' && (<><p className="text-sm font-bold text-green-600 mb-2">Total: R$ {formatMoney(data.totalReceived || 0)}</p>
+              {(() => {
+                // Juntar parcelas e avulsos em uma única lista ordenada por data (mais recente primeiro)
+                const todos = [
+                  ...(data.receivedInstallments || []).map((inst: any) => ({
+                    tipo: 'parcela',
+                    nome: inst.client_name,
+                    data: inst.payment_date,
+                    desc: `Parcela ${inst.installment_number}x`,
+                    valor: inst.paid_amount || inst.amount || 0
+                  })),
+                  ...(data.extraPayments || []).map((ep: any) => ({
+                    tipo: 'avulso',
+                    nome: ep.clients?.name || 'Cliente',
+                    data: ep.created_at,
+                    desc: 'Pagamento Avulso',
+                    valor: ep.amount || 0
+                  }))
+                ].sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime())
+
+                if (todos.length === 0) return <p className="text-sm text-gray-400 text-center py-4">Nenhum recebimento</p>
+
+                return todos.map((item, i) => (
+                  <div key={i} className={`p-3 rounded-xl ${item.tipo === 'avulso' ? 'bg-green-50 border border-green-200' : 'bg-green-50'}`}>
+                    <div className="flex justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{item.nome}</p>
+                        <p className="text-xs text-gray-500">{item.desc} - {new Date(item.data).toLocaleDateString('pt-BR')}</p>
+                      </div>
+                      <p className="font-bold text-green-700">R$ {formatMoney(item.valor)}</p>
+                    </div>
+                  </div>
+                ))
+              })()}
+            </>)}
 
             {/* BOLETOS PAGOS */}
             {modal?.type === 'boletosPagos' && (<><p className="text-sm font-bold text-blue-600 mb-2">Total: R$ {formatMoney(data.totalPaidBills || 0)}</p>{data.paidBills?.map((bill: any) => (<div key={bill.id} className="bg-blue-50 p-3 rounded-xl"><div className="flex justify-between"><div><p className="text-sm font-medium">{bill.supplier}</p><p className="text-xs text-gray-500">Pago: {new Date(bill.payment_date).toLocaleDateString('pt-BR')}</p></div><p className="font-bold text-blue-700">R$ {formatMoney(bill.paid_amount || bill.amount || 0)}</p></div></div>))}{!data.paidBills?.length && <p className="text-sm text-gray-400 text-center py-4">Nenhum boleto pago</p>}</>)}
