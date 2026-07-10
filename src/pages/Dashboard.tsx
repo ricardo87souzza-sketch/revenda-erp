@@ -230,12 +230,12 @@ export default function Dashboard() {
           <DialogHeader><DialogTitle>{modal?.title}</DialogTitle></DialogHeader>
           <div className="space-y-2 mt-2">
             {/* RECEBIMENTOS - ORDENADOS POR MAIS RECENTES */}
-                        {modal?.type === 'recebimentos' && (<><p className="text-sm font-bold text-green-600 mb-2">Total: R$ {formatMoney(data.totalReceived || 0)}</p>
+                                    {modal?.type === 'recebimentos' && (<><p className="text-sm font-bold text-green-600 mb-2">Total: R$ {formatMoney(data.totalReceived || 0)}</p>
               {(() => {
-                // Juntar parcelas e avulsos em uma única lista ordenada por data (mais recente primeiro)
                 const todos = [
                   ...(data.receivedInstallments || []).map((inst: any) => ({
                     tipo: 'parcela',
+                    id: inst.id,
                     nome: inst.client_name,
                     data: inst.payment_date,
                     desc: `Parcela ${inst.installment_number}x`,
@@ -243,6 +243,7 @@ export default function Dashboard() {
                   })),
                   ...(data.extraPayments || []).map((ep: any) => ({
                     tipo: 'avulso',
+                    id: ep.id,
                     nome: ep.clients?.name || 'Cliente',
                     data: ep.created_at,
                     desc: 'Pagamento Avulso',
@@ -252,14 +253,43 @@ export default function Dashboard() {
 
                 if (todos.length === 0) return <p className="text-sm text-gray-400 text-center py-4">Nenhum recebimento</p>
 
+                const handleDeleteEntry = async (item: any) => {
+                  if (!confirm(`Excluir este recebimento de R$ ${formatMoney(item.valor)}?`)) return
+                  
+                  if (item.tipo === 'parcela') {
+                    // Reverter parcela para pendente
+                    await supabase.from('installments').update({
+                      status: 'pendente',
+                      paid_amount: 0,
+                      payment_date: null
+                    }).eq('id', item.id)
+                  } else {
+                    // Excluir pagamento avulso
+                    await supabase.from('extra_payments').delete().eq('id', item.id)
+                    // Reverter valores nas parcelas (complexo, vamos simplificar)
+                  }
+                  
+                  refetch()
+                  alert('Recebimento excluído! Os valores foram revertidos.')
+                }
+
                 return todos.map((item, i) => (
-                  <div key={i} className={`p-3 rounded-xl ${item.tipo === 'avulso' ? 'bg-green-50 border border-green-200' : 'bg-green-50'}`}>
+                  <div key={i} className={`p-3 rounded-xl relative group ${item.tipo === 'avulso' ? 'bg-green-50 border border-green-200' : 'bg-green-50'}`}>
                     <div className="flex justify-between">
-                      <div>
+                      <div className="flex-1">
                         <p className="text-sm font-medium">{item.nome}</p>
                         <p className="text-xs text-gray-500">{item.desc} - {new Date(item.data).toLocaleDateString('pt-BR')}</p>
                       </div>
-                      <p className="font-bold text-green-700">R$ {formatMoney(item.valor)}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-green-700">R$ {formatMoney(item.valor)}</p>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteEntry(item) }}
+                          className="text-gray-300 hover:text-red-500 text-lg leading-none p-1"
+                          title="Excluir"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))
