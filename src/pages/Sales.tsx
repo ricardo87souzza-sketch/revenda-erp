@@ -119,43 +119,50 @@ export default function Sales() {
       await supabase.from('installments').delete().eq('sale_id', editingSale.id)
       await supabase.from('sale_items').insert(valid.map(i => ({ sale_id: editingSale.id, product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity })))
       if (paymentMethod === 'a_prazo') { const amt = Math.ceil((total / installments) * 100) / 100; await supabase.from('installments').insert(installmentDates.map((d, idx) => ({ sale_id: editingSale.id, installment_number: idx + 1, due_date: d, amount: amt, status: paymentStatus, paid_amount: paymentStatus === 'pago' ? amt : 0, payment_date: paymentStatus === 'pago' ? new Date().toISOString() : null }))) }
+    } else if (debtAction === 'merge' && existingDebt) {
+      // SOMAR: cancelar vendas antigas, criar nova venda unificada com todos os produtos
+      for (const os of existingDebt.sales) {
+        await supabase.from('sales').update({ status: 'unificada' }).eq('id', os.id)
+      }
+
+      const allItems = [...valid]
+      for (const os of existingDebt.sales) {
+        const { data: oldItems } = await supabase.from('sale_items').select('*').eq('sale_id', os.id)
+        if (oldItems) {
+          for (const oi of oldItems) {
+            const existing = allItems.find(i => i.product_id === oi.product_id)
+            if (existing) { existing.quantity += oi.quantity } else {
+              const { data: prod } = await supabase.from('products').select('name, sale_price').eq('id', oi.product_id).single()
+              allItems.push({ product_id: oi.product_id, product_name: prod?.name || 'Produto', quantity: oi.quantity, unit_price: oi.unit_price })
+            }
+          }
+        }
+      }
+
+      const newTotal = existingDebt.total + total
+      const { data: sale, error } = await supabase.from('sales').insert({
+        user_id: user?.id, client_id: selectedClient.id,
+        total_amount: newTotal, payment_method: 'a_prazo',
+        notes: `Venda unificada. ${notes}`, status: 'ativa'
+      }).select().single()
+      if (error) return alert(error.message)
+
+      await supabase.from('sale_items').insert(allItems.map(i => ({ sale_id: sale.id, product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity })))
+
+      const amt = Math.ceil((newTotal / installments) * 100) / 100
+      await supabase.from('installments').insert(installmentDates.map((d, idx) => ({
+        sale_id: sale.id, installment_number: idx + 1, due_date: d, amount: amt,
+        status: 'pendente', paid_amount: 0, payment_date: null
+      })))
+
+      alert(`Vendas unificadas!\nNovo total: R$ ${formatMoney(newTotal)}\n${installments}x de R$ ${formatMoney(amt)}`)
     } else {
-      if (debtAction === 'merge' && existingDebt) {
-        // SOMAR: cancelar parcelas pendentes das vendas antigas, criar nova venda com novo total
-        for (const os of existingDebt.sales) {
-          // Cancelar apenas as parcelas PENDENTES (manter as já pagas)
-          await supabase.from('installments').update({ status: 'cancelada' }).eq('sale_id', os.id).eq('status', 'pendente')
-          // Manter a venda antiga como ativa (histórico preservado)
-        }
-
-        // Criar nova venda com os produtos atuais + referência à soma
-        const newTotal = existingDebt.total + total
-        const { data: sale, error } = await supabase.from('sales').insert({
-          user_id: user?.id, client_id: selectedClient.id,
-          total_amount: newTotal, payment_method: 'a_prazo',
-          notes: `Venda unificada. ${notes}`,
-          status: 'ativa'
-        }).select().single()
-        if (error) return alert(error.message)
-
-        await supabase.from('sale_items').insert(valid.map(i => ({ sale_id: sale.id, product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity })))
-
-        const amt = Math.ceil((newTotal / installments) * 100) / 100
-        await supabase.from('installments').insert(installmentDates.map((d, idx) => ({
-          sale_id: sale.id, installment_number: idx + 1, due_date: d, amount: amt,
-          status: 'pendente', paid_amount: 0, payment_date: null
-        })))
-
-        alert(`Vendas unificadas!\nNovo total: R$ ${formatMoney(newTotal)}\n${installments}x de R$ ${formatMoney(amt)}\nHistórico de pagamentos anterior preservado.`)
-      } else {
-        // Venda normal (separada ou sem dívida)
-        const { data: sale, error } = await supabase.from('sales').insert({ user_id: user?.id, client_id: selectedClient.id, total_amount: total, payment_method: paymentMethod, notes, status: 'ativa' }).select().single()
-        if (error) return alert(error.message)
-        await supabase.from('sale_items').insert(valid.map(i => ({ sale_id: sale.id, product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity })))
-        if (paymentMethod === 'a_prazo') {
-          const amt = Math.ceil((total / installments) * 100) / 100
-          await supabase.from('installments').insert(installmentDates.map((d, idx) => ({ sale_id: sale.id, installment_number: idx + 1, due_date: d, amount: amt, status: paymentStatus, paid_amount: paymentStatus === 'pago' ? amt : 0, payment_date: paymentStatus === 'pago' ? new Date().toISOString() : null })))
-        }
+      const { data: sale, error } = await supabase.from('sales').insert({ user_id: user?.id, client_id: selectedClient.id, total_amount: total, payment_method: paymentMethod, notes, status: 'ativa' }).select().single()
+      if (error) return alert(error.message)
+      await supabase.from('sale_items').insert(valid.map(i => ({ sale_id: sale.id, product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity })))
+      if (paymentMethod === 'a_prazo') {
+        const amt = Math.ceil((total / installments) * 100) / 100
+        await supabase.from('installments').insert(installmentDates.map((d, idx) => ({ sale_id: sale.id, installment_number: idx + 1, due_date: d, amount: amt, status: paymentStatus, paid_amount: paymentStatus === 'pago' ? amt : 0, payment_date: paymentStatus === 'pago' ? new Date().toISOString() : null })))
       }
     }
     setShowForm(false); setEditingSale(null); resetForm()
