@@ -25,6 +25,7 @@ export default function Sales() {
   const [installmentDates, setInstallmentDates] = useState<string[]>([])
   const [paymentStatus, setPaymentStatus] = useState('pago')
   const [notes, setNotes] = useState('')
+  const [mergeMode, setMergeMode] = useState<'diluir' | 'novas' | null>(null)
   const { user } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -120,42 +121,51 @@ export default function Sales() {
       await supabase.from('sale_items').insert(valid.map(i => ({ sale_id: editingSale.id, product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity })))
       if (paymentMethod === 'a_prazo') { const amt = Math.ceil((total / installments) * 100) / 100; await supabase.from('installments').insert(installmentDates.map((d, idx) => ({ sale_id: editingSale.id, installment_number: idx + 1, due_date: d, amount: amt, status: paymentStatus, paid_amount: paymentStatus === 'pago' ? amt : 0, payment_date: paymentStatus === 'pago' ? new Date().toISOString() : null }))) }
     } else if (debtAction === 'merge' && existingDebt) {
-      // SOMAR: cancelar vendas antigas, criar nova venda unificada com todos os produtos
-      for (const os of existingDebt.sales) {
-        await supabase.from('sales').update({ status: 'unificada' }).eq('id', os.id)
-      }
-
-      const allItems = [...valid]
-      for (const os of existingDebt.sales) {
-        const { data: oldItems } = await supabase.from('sale_items').select('*').eq('sale_id', os.id)
-        if (oldItems) {
-          for (const oi of oldItems) {
-            const existing = allItems.find(i => i.product_id === oi.product_id)
-            if (existing) { existing.quantity += oi.quantity } else {
-              const { data: prod } = await supabase.from('products').select('name, sale_price').eq('id', oi.product_id).single()
-              allItems.push({ product_id: oi.product_id, product_name: prod?.name || 'Produto', quantity: oi.quantity, unit_price: oi.unit_price })
-            }
-          }
-        }
-      }
-
+      // MODAL DE ESCOLHA: Diluir ou Novas Parcelas
+      if (!mergeMode) return
+      
       const newTotal = existingDebt.total + total
-      const { data: sale, error } = await supabase.from('sales').insert({
-        user_id: user?.id, client_id: selectedClient.id,
-        total_amount: newTotal, payment_method: 'a_prazo',
-        notes: `Venda unificada. ${notes}`, status: 'ativa'
-      }).select().single()
-      if (error) return alert(error.message)
 
-      await supabase.from('sale_items').insert(allItems.map(i => ({ sale_id: sale.id, product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity })))
+      if (mergeMode === 'diluir') {
+        // DILUIR: Cancelar parcelas pendentes antigas, adicionar valor nas parcelas restantes da venda antiga
+        // Manter a venda antiga ATIVA, só recalcular as parcelas pendentes
+        const pendingCount = existingDebt.installments.length
+        const amt = Math.ceil((newTotal / pendingCount) * 100) / 100
+        
+        for (const inst of existingDebt.installments) {
+          await supabase.from('installments').update({ amount: amt }).eq('id', inst.id)
+        }
+        
+        // Adicionar itens na venda antiga (a primeira)
+        const mainSale = existingDebt.sales[0]
+        await supabase.from('sale_items').insert(valid.map(i => ({ sale_id: mainSale.id, product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity })))
+        await supabase.from('sales').update({ total_amount: newTotal, notes: `Venda atualizada com novos produtos. ${notes}` }).eq('id', mainSale.id)
 
-      const amt = Math.ceil((newTotal / installments) * 100) / 100
-      await supabase.from('installments').insert(installmentDates.map((d, idx) => ({
-        sale_id: sale.id, installment_number: idx + 1, due_date: d, amount: amt,
-        status: 'pendente', paid_amount: 0, payment_date: null
-      })))
+        alert(`Diluído nas parcelas restantes!\nNovo total: R$ ${formatMoney(newTotal)}\n${pendingCount}x de R$ ${formatMoney(amt)}`)
+      } else {
+        // NOVAS PARCELAS: Cancelar parcelas pendentes antigas, criar nova venda
+        for (const inst of existingDebt.installments) {
+          await supabase.from('installments').update({ status: 'cancelada' }).eq('id', inst.id)
+        }
 
-      alert(`Vendas unificadas!\nNovo total: R$ ${formatMoney(newTotal)}\n${installments}x de R$ ${formatMoney(amt)}`)
+        const { data: sale, error } = await supabase.from('sales').insert({
+          user_id: user?.id, client_id: selectedClient.id,
+          total_amount: newTotal, payment_method: 'a_prazo',
+          notes: `Venda unificada. ${notes}`, status: 'ativa'
+        }).select().single()
+        if (error) return alert(error.message)
+
+        await supabase.from('sale_items').insert(valid.map(i => ({ sale_id: sale.id, product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, total_price: i.unit_price * i.quantity })))
+
+        const amt = Math.ceil((newTotal / installments) * 100) / 100
+        await supabase.from('installments').insert(installmentDates.map((d, idx) => ({
+          sale_id: sale.id, installment_number: idx + 1, due_date: d, amount: amt,
+          status: 'pendente', paid_amount: 0, payment_date: null
+        })))
+
+        alert(`Novas parcelas!\nTotal: R$ ${formatMoney(newTotal)}\n${installments}x de R$ ${formatMoney(amt)}`)
+      }
+      setMergeMode(null)
     } else {
       const { data: sale, error } = await supabase.from('sales').insert({ user_id: user?.id, client_id: selectedClient.id, total_amount: total, payment_method: paymentMethod, notes, status: 'ativa' }).select().single()
       if (error) return alert(error.message)
@@ -172,11 +182,11 @@ export default function Sales() {
   const resetForm = () => {
     setSelectedClient(null); setItems([{ product_id: '', product_name: '', quantity: 1, unit_price: 0 }])
     setPaymentMethod('dinheiro'); setInstallments(1); setInstallmentDates([]); setPaymentStatus('pago'); setNotes('')
-    setExistingDebt(null)
+    setExistingDebt(null); setMergeMode(null)
   }
 
   const handleCancel = async (id: string) => {
-    if (!confirm('Cancelar esta venda? O estoque será devolvido.')) return
+    if (!confirm('Cancelar esta venda?')) return
     const { error } = await supabase.from('sales').update({ status: 'cancelada' }).eq('id', id)
     if (!error) { alert('Venda cancelada!'); refetchSales(); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['products-stock'] }) }
   }
@@ -234,12 +244,23 @@ export default function Sales() {
         </DialogContent>
       </Dialog>
 
+      {/* Modal Dívida com escolha Diluir ou Novas Parcelas */}
       <Dialog open={showDebtModal} onOpenChange={setShowDebtModal}>
         <DialogContent className="ios-sheet max-w-sm"><DialogHeader><DialogTitle>Cliente com Débitos</DialogTitle></DialogHeader>
-          <div className="space-y-3 mt-2"><p>Pendente: <b className="text-red-500">R$ {formatMoney(existingDebt?.total || 0)}</b></p>
-            <p className="text-xs text-gray-400">Ao somar, o histórico de pagamentos anteriores será preservado.</p>
+          <div className="space-y-3 mt-2">
+            <p>Pendente atual: <b className="text-red-500">R$ {formatMoney(existingDebt?.total || 0)}</b></p>
+            <p>Nova compra: <b className="text-blue-500">R$ {formatMoney(calcTotal())}</b></p>
+            <p>Total somado: <b className="text-purple-500">R$ {formatMoney((existingDebt?.total || 0) + calcTotal())}</b></p>
+            <p className="text-xs text-gray-400">Escolha como deseja unificar:</p>
+            <Button onClick={() => { setMergeMode('diluir'); setShowDebtModal(false); handleSave('merge') }} className="w-full bg-green-500 text-left">
+              📊 Diluir nas parcelas restantes<br />
+              <span className="text-[10px] opacity-80">Mantém a venda original, recalcula as parcelas pendentes com o novo valor total</span>
+            </Button>
+            <Button onClick={() => { setMergeMode('novas'); setShowDebtModal(false); handleSave('merge') }} className="w-full bg-orange-500 text-left">
+              🆕 Criar novas parcelas<br />
+              <span className="text-[10px] opacity-80">Cancela as parcelas pendentes antigas, cria uma nova venda com novas datas</span>
+            </Button>
             <Button onClick={() => handleSave('separate')} className="w-full bg-blue-500">📋 Venda Separada</Button>
-            <Button onClick={() => handleSave('merge')} className="w-full bg-orange-500">🔄 Somar (Nova parcela: R$ {formatMoney(((existingDebt?.total || 0) + calcTotal()) / (installments || 1))})</Button>
             <Button variant="outline" onClick={() => setShowDebtModal(false)} className="w-full">Cancelar</Button>
           </div>
         </DialogContent>
